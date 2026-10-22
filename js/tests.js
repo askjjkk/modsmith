@@ -1,6 +1,6 @@
 // Мини-набор тестов: открыть tests.html через локальный сервер
 import { parse, detectThemes, detectVersion, detectLoader } from './parser.js'
-import { PackBuilder, buildPack, groupOf, pickVersion } from './builder.js'
+import { PackBuilder, buildPack, groupOf, majorMinor, missingBase, pickVersion } from './builder.js'
 import { buildIndex } from './mrpack.js'
 import { isPlatform, nestedIds, parseFabric, parseToml } from './jarmeta.js'
 
@@ -188,6 +188,42 @@ test('проверка jar: библиотека добавляется, мод 
   eq(b.mods().map(m => m.project.id).sort(), ['spa-id', 'wiz'])
   eq(b.skipped.some(s => s.title === 'Beyond Adventures' && s.why.includes('tensura')), true)
   eq(b.chosen.get('spa-id').parentId, 'wiz')
+})
+
+// --- «отстал от библиотеки» и «дополнение без основы» ---
+test('majorMinor без версии Minecraft', () => {
+  eq(majorMinor('1.10.9+1.21.1-fabric', '1.21.1'), '1.10')
+  eq(majorMinor('1.8.0+1.21.1-fabric', '1.21.1'), '1.8')
+  eq(majorMinor('fabric-1.21.1-26.6.0', '1.21.1'), '26.6')
+})
+test('дополнение к Cobblemon без Cobblemon не берётся', () => {
+  const chosen = new Map()
+  eq(missingBase({ slug: 'cobbleboss', title: 'CobbleBoss', description: 'Bosses in the Cobblemon world.' }, chosen), 'Cobblemon')
+  chosen.set('c', { project: { slug: 'cobblemon' } })
+  eq(missingBase({ slug: 'cobbleboss', title: 'CobbleBoss', description: 'Bosses in the Cobblemon world.' }, chosen), null)
+  eq(missingBase({ slug: 'wizards', title: 'Wizards (RPG Series)', description: 'Wizard spells' }, new Map()), null)
+})
+test('мод, отставший от своей библиотеки, убирается', async () => {
+  const ver = (id, number, date) => ({ id: `v-${id}-${number}`, version_number: number, version_type: 'release', date_published: date, dependencies: [],
+    files: [{ primary: true, url: `https://cdn/${id}.jar`, filename: `${id}.jar`, size: 10, hashes: { sha1: 'a', sha512: 'b' } }] })
+  const versions = {
+    se: [ver('se', '1.10.9+1.21.1-fabric', '2026-09-29'), ver('se', '1.9.0+1.21.1-fabric', '2026-02-28'), ver('se', '1.8.0+1.21.1-fabric', '2025-09-20')],
+    mb: [ver('mb', '1.7.0+1.21.1', '2025-10-15')],
+    wiz: [ver('wiz', '3.1.3+1.21.1', '2026-10-01')],
+  }
+  const api = fakeApi({ projects: {}, versions, search: {} })
+  const metas = {
+    'https://cdn/se.jar': { ids: ['spell_engine'], depends: [], nested: [] },
+    'https://cdn/mb.jar': { ids: ['rpg_minibosses'], depends: ['spell_engine'], nested: [] },
+    'https://cdn/wiz.jar': { ids: ['wizards'], depends: ['spell_engine'], nested: [] },
+  }
+  const b = new PackBuilder(api, { version: '1.21.1', loader: 'fabric' }, { readMeta: async url => metas[url] || null })
+  await b.tryAdd(P('se', { title: 'Spell Engine' }), { id: 'magic' }, '')
+  await b.tryAdd(P('mb', { title: 'RPG Minibosses' }), { id: 'bosses' }, '')
+  await b.tryAdd(P('wiz', { title: 'Wizards' }), { id: 'magic' }, '')
+  await b.verifyJars()
+  eq(b.mods().map(m => m.project.id).sort(), ['se', 'wiz'])
+  eq(b.skipped.find(s => s.title === 'RPG Minibosses').why.includes('1.8'), true)
 })
 
 // --- запуск ---

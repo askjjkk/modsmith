@@ -21,6 +21,49 @@ export function groupOf(project) {
 export const isLibrary = project => (project.categories || []).includes('library')
 
 export const MIN_DOWNLOADS = 15000
+
+// Крупные моды, к которым пишут дополнения. Если описание мода про них, а их нет в сборке, мод не работает
+// (пример: CobbleBoss «для мира Cobblemon» падает без Cobblemon, хотя зависимость нигде не указана).
+export const ECOSYSTEMS = [
+  ['Cobblemon', /\bcobblemon\b/i, 'cobblemon'],
+  ['Pixelmon', /\bpixelmon\b/i, 'pixelmon'],
+  ['Create', /^create[:\s]|\bcreate addon|\baddon (for|to) create\b|\bfor create\b/i, 'create'],
+  ['Mekanism', /\bmekanism\b/i, 'mekanism'],
+  ['Applied Energistics 2', /\bapplied energistics\b|\bae2\b/i, 'ae2'],
+  ['Iron\'s Spells', /\biron'?s spells\b/i, 'irons-spells-n-spellbooks'],
+  ['Ars Nouveau', /\bars nouveau\b/i, 'ars-nouveau'],
+  ['Botania', /\bbotania\b/i, 'botania'],
+  ['Tinkers\' Construct', /\btinkers'? construct\b/i, 'tinkers-construct'],
+  ['L_Ender\'s Cataclysm', /\bcataclysm\b/i, 'l_enders_cataclysm'],
+  ['Alex\'s Mobs', /\balex'?s mobs\b/i, 'alexs-mobs'],
+  ['Farmer\'s Delight', /\bfarmer'?s delight\b/i, 'farmers-delight'],
+  ['Origins', /\borigins? (addon|expansion)\b/i, 'origins'],
+  ['Tensura', /\btensura\b/i, 'tensura-reincarnated'],
+]
+
+export function missingBase(project, chosen) {
+  const text = `${project.title} ${project.description || ''}`
+  const have = new Set([...chosen.values()].map(m => m.project.slug))
+  for (const [name, re, slug] of ECOSYSTEMS) {
+    if (project.slug === slug || have.has(slug)) continue
+    if (re.test(text)) return name
+  }
+  return null
+}
+
+// Библиотеки, которые обычно не ломают старые моды при обновлении
+const STABLE_LIBS = new Set(['fabric-api', 'fabric-language-kotlin', 'kotlin-for-forge', 'cloth-config', 'architectury-api',
+  'forge-config-api-port', 'yacl', 'modmenu', 'trinkets', 'curios', 'playeranimator', 'geckolib', 'azurelib', 'balm',
+  'puzzles-lib', 'resourceful-config', 'resourceful-lib', 'structure-pool-api', 'cardinal-components-api', 'owo-lib',
+  'midnightlib', 'jei', 'emi', 'jade', 'terrablender', 'lithostitched', 'bookshelf-lib', 'citadel', 'collective',
+  'sodium', 'iris', 'qsl', 'patchouli', 'searchables', 'konkrete', 'framework', 'cristel-lib', 'yungs-api'])
+
+// «1.10.9+1.21.1-fabric» -> «1.10», «fabric-1.21.1-26.6.0» -> «26.6» (версию Minecraft выкидываем)
+export function majorMinor(versionNumber, mc) {
+  const s = String(versionNumber).split(mc).join(' ').split('+')[0]
+  const m = s.match(/(\d+)\.(\d+)/)
+  return m ? `${m[1]}.${m[2]}` : null
+}
 // шуточные и «не про то» моды, которые поиск любит поднимать
 const NOISE = /dragon ?ball|meme|joke|troll|april fools|\bmod ?pack\b/i
 
@@ -100,6 +143,11 @@ export class PackBuilder {
     if (!allowLibrary && isLibrary(project)) return false
     const g = groupOf(project)
     if (g && this.groups.has(g)) return false
+    const base = !allowLibrary && missingBase(project, this.chosen)
+    if (base) {
+      this.skipped.push({ title: project.title, why: `дополнение к ${base}, а его нет в сборке` })
+      return false
+    }
     const version = await this.versionFor(project.id)
     if (!version) {
       this.skipped.push({ title: project.title, why: `нет версии под ${this.version} ${this.loader}` })
@@ -125,7 +173,7 @@ export class PackBuilder {
   commit(project, version, section, reason, dep, parentId = null) {
     const file = fileOf(version)
     if (!file) return
-    const mod = { project, version: { id: version.id, number: version.version_number }, file, section, reason, dep, parentId, incompatible: incompatibleIds(version) }
+    const mod = { project, version: { id: version.id, number: version.version_number, date: version.date_published }, file, section, reason, dep, parentId, incompatible: incompatibleIds(version) }
     this.chosen.set(project.id, mod)
     const g = groupOf(project)
     if (g && !this.groups.has(g)) this.groups.set(g, project.id)
@@ -195,6 +243,43 @@ export class PackBuilder {
   }
 
   /**
+   * Убирает моды, которые отстали от своей библиотеки (сделаны под Spell Engine 1.8, а в сборке 1.10:
+   * формально «>=1.7» подходит, но нужные классы уже удалены), и дополнения, у которых пропала основа.
+   * Возвращает true, если что-то убрал.
+   */
+  async checkStale(mods, metas) {
+    const byId = new Map()
+    mods.forEach((m, i) => metas[i]?.ids.forEach(id => byId.set(id, m)))
+    let removed = false
+    for (const [i, m] of mods.entries()) {
+      if (m.dep || !this.chosen.has(m.project.id)) continue
+      if (!['perf', 'qol'].includes(m.section.id)) {
+        const base = missingBase(m.project, this.chosen)
+        if (base) {
+          this.remove(m.project.id, `дополнение к ${base}, а его нет в сборке`)
+          removed = true
+          continue
+        }
+      }
+      if (!m.version.date || !metas[i]) continue
+      for (const depId of metas[i].depends) {
+        const d = byId.get(depId)
+        if (!d || d === m || STABLE_LIBS.has(d.project.slug)) continue
+        const list = await this.api.versions(d.project.id, this.version, this.loaders)
+        const before = list.find(v => v.date_published <= m.version.date)
+        const then = before && majorMinor(before.version_number, this.version)
+        const now = majorMinor(d.version.number, this.version)
+        if (then && now && then !== now) {
+          this.remove(m.project.id, `давно не обновлялся: сделан под ${d.project.title} ${then}, а в сборке ${now}`)
+          removed = true
+          break
+        }
+      }
+    }
+    return removed
+  }
+
+  /**
    * Проверка «что внутри»: читает fabric.mod.json / mods.toml каждого мода.
    * Чего не хватает — ищет и добавляет; не нашлось — убирает мод, которому это нужно.
    */
@@ -217,7 +302,10 @@ export class PackBuilder {
           missing.get(dep).push(m)
         }
       })
-      if (!missing.size) return
+      if (!missing.size) {
+        if (await this.checkStale(mods, metas)) continue // что-то убрали — проверяем ещё раз
+        return
+      }
       for (const [dep, needers] of missing) {
         const provider = await this.findProvider(dep)
         const section = { id: 'deps', label: 'Библиотеки и зависимости', color: '#8d95b0' }
