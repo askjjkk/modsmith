@@ -2,7 +2,10 @@
 export const LOADER_KEYS = { fabric: 'fabric-loader', quilt: 'quilt-loader', forge: 'forge', neoforge: 'neoforge' }
 export const LOADER_NAMES = { fabric: 'Fabric', quilt: 'Quilt', forge: 'Forge', neoforge: 'NeoForge' }
 
-const env = v => (['required', 'optional', 'unsupported'].includes(v) ? v : 'optional')
+// В одиночной игре внутри клиента работает свой сервер, поэтому на клиент ставим всё,
+// даже «серверные» библиотеки (иначе лаунчер их пропустит и игра не запустится).
+// На сервер не ставим только чисто клиентские моды (Sodium, мини-карты и т.п.).
+const envOf = project => ({ client: 'required', server: project.server === 'unsupported' ? 'unsupported' : 'required' })
 
 export function buildIndex({ name, summary, version, loader, loaderVersion, mods }) {
   const dependencies = { minecraft: version }
@@ -16,7 +19,7 @@ export function buildIndex({ name, summary, version, loader, loaderVersion, mods
     files: mods.map(m => ({
       path: `mods/${m.file.filename}`,
       hashes: { sha1: m.file.hashes.sha1, sha512: m.file.hashes.sha512 },
-      env: { client: env(m.project.client), server: env(m.project.server) },
+      env: envOf(m.project),
       downloads: [m.file.url],
       fileSize: m.file.size,
     })),

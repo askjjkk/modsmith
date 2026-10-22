@@ -2,6 +2,7 @@
 import { parse, detectThemes, detectVersion, detectLoader } from './parser.js'
 import { PackBuilder, buildPack, groupOf, pickVersion } from './builder.js'
 import { buildIndex } from './mrpack.js'
+import { isPlatform, nestedIds, parseFabric, parseToml } from './jarmeta.js'
 
 const results = []
 const test = (name, fn) => results.push({ name, fn })
@@ -110,7 +111,7 @@ test('buildPack: база + темы в пределах бюджета', async 
     search.magic.push(`m${i}`)
   }
   const api = fakeApi({ projects, versions, search })
-  const pack = await buildPack({ version: '1.20.1', loader: 'fabric', size: 'light', perf: true, qol: false, themes: detectThemes('магия') }, api)
+  const pack = await buildPack({ version: '1.20.1', loader: 'fabric', size: 'light', perf: true, qol: false, themes: detectThemes('магия'), readMeta: async () => null }, api)
   eq(pack.mods.filter(m => m.section.id === 'magic').length, 8)
   eq(pack.mods.filter(m => m.section.id === 'perf').map(m => m.project.id), ['sodium', 'lithium'])
   eq(pack.mods.find(m => m.project.id === 'm0').reason, 'за «магия»')
@@ -123,7 +124,7 @@ test('малоизвестные и шуточные моды отсекаютс
     joke: P('joke', { title: 'DragonMine Z - Dragon Ball', downloads: 5000000 }),
   }
   const api = fakeApi({ projects, versions: { good: V('good'), tiny: V('tiny'), joke: V('joke') }, search: { dragons: ['tiny', 'joke', 'good'], dragon: [] } })
-  const pack = await buildPack({ version: '1.20.1', loader: 'forge', size: 'light', perf: false, qol: false, themes: detectThemes('драконы') }, api)
+  const pack = await buildPack({ version: '1.20.1', loader: 'forge', size: 'light', perf: false, qol: false, themes: detectThemes('драконы'), readMeta: async () => null }, api)
   eq(pack.mods.map(m => m.project.id)[0], 'good')
   eq(pack.mods.some(m => m.project.id === 'tiny'), false)
 })
@@ -134,6 +135,59 @@ test('индекс mrpack', () => {
     mods: [{ project: { client: 'required', server: 'unsupported' }, file: { filename: 'a.jar', url: 'u', size: 5, hashes: { sha1: '1', sha512: '2' } }, version: { number: '1' } }] })
   eq(idx.dependencies, { minecraft: '1.20.1', 'fabric-loader': '0.16.0' })
   eq(idx.files[0], { path: 'mods/a.jar', hashes: { sha1: '1', sha512: '2' }, env: { client: 'required', server: 'unsupported' }, downloads: ['u'], fileSize: 5 })
+})
+
+test('серверная библиотека всё равно ставится на клиент', () => {
+  const idx = buildIndex({ name: 'X', summary: 's', version: '1.21.1', loader: 'fabric', loaderVersion: '0.19.5',
+    mods: [{ project: { client: 'unsupported', server: 'required' }, file: { filename: 'spa.jar', url: 'u', size: 5, hashes: { sha1: '1', sha512: '2' } }, version: { number: '1' } }] })
+  eq(idx.files[0].env, { client: 'required', server: 'required' })
+})
+
+// --- что внутри jar ---
+test('разбор fabric.mod.json', () => {
+  const m = parseFabric(JSON.stringify({ id: 'wizards', provides: ['spell-power'], depends: { fabricloader: '*', 'structure_pool_api': '*', minecraft: '1.21.1' }, jars: [{ file: 'META-INF/jars/spell_engine-1.2.0+1.21.1.jar' }] }))
+  eq(m.ids, ['wizards', 'spell_power'])
+  eq(m.depends, ['fabricloader', 'structure_pool_api', 'minecraft'])
+  eq(m.nested, ['spell_engine'])
+})
+test('вложенные jar: имя с загрузчиком в хвосте', () => {
+  eq(nestedIds('META-INF/jars/xaerolib-fabric-1.21.1-1.1.0.jar'), ['xaerolib_fabric', 'xaerolib'])
+  eq(nestedIds('META-INF/jarjar/structure_pool_api-1.2.0+1.21.1.jar'), ['structure_pool_api'])
+  eq(nestedIds('META-INF/jars/quilted_fabric_api_lookup_api_v1-7.0.0+0.92.1-1.20.1.jar'), ['quilted_fabric_api_lookup_api_v1'])
+  eq(nestedIds('META-INF/jars/fabric-api-base-0.4.42+6573ed8c19.jar'), ['fabric_api_base'])
+  eq(nestedIds('META-INF/jars/foo_lib_1.2.0.jar'), ['foo_lib'])
+})
+test('разбор mods.toml: обязательные и необязательные зависимости', () => {
+  const toml = `modLoader="javafml"\n[[mods]]\nmodId="beyond"\n[[dependencies.beyond]]\nmodId="forge"\nmandatory=true\n[[dependencies.beyond]]\n modId = "tensura"\n type="required"\n[[dependencies.beyond]]\nmodId="jei"\ntype="optional"\n[[dependencies.beyond]]\nmodId="curios"\nmandatory=false`
+  const m = parseToml(toml)
+  eq(m.ids, ['beyond'])
+  eq(m.depends, ['forge', 'tensura'])
+})
+test('платформенные id не считаются недостающими', () => {
+  eq(['minecraft', 'fabricloader', 'fabric-api-base', 'java', 'neoforge'].every(isPlatform), true)
+  eq(isPlatform('fabric_api'), false)
+  eq(isPlatform('structure_pool_api'), false)
+})
+
+test('проверка jar: библиотека добавляется, мод без зависимости убирается', async () => {
+  const projects = {
+    wiz: P('wiz', { title: 'Wizards' }), beyond: P('beyond', { title: 'Beyond Adventures' }),
+    'structure-pool-api': P('spa-id', { slug: 'structure-pool-api', title: 'Structure Pool API', categories: ['library'] }),
+  }
+  projects['spa-id'] = projects['structure-pool-api']
+  const api = fakeApi({ projects, versions: { wiz: V('wiz'), beyond: V('beyond'), 'spa-id': V('spa') }, search: {} })
+  const metas = {
+    'https://cdn/wiz.jar': { ids: ['wizards'], depends: ['minecraft', 'structure_pool_api'], nested: [] },
+    'https://cdn/beyond.jar': { ids: ['beyond_gacha_c'], depends: ['tensura'], nested: [] },
+    'https://cdn/spa.jar': { ids: ['structure_pool_api'], depends: [], nested: [] },
+  }
+  const b = new PackBuilder(api, { version: '1.21.1', loader: 'fabric' }, { readMeta: async url => metas[url] || null })
+  await b.tryAdd(P('wiz', { title: 'Wizards' }), { id: 'rpg' }, '')
+  await b.tryAdd(P('beyond', { title: 'Beyond Adventures' }), { id: 'adventure' }, '')
+  await b.verifyJars()
+  eq(b.mods().map(m => m.project.id).sort(), ['spa-id', 'wiz'])
+  eq(b.skipped.some(s => s.title === 'Beyond Adventures' && s.why.includes('tensura')), true)
+  eq(b.chosen.get('spa-id').parentId, 'wiz')
 })
 
 // --- запуск ---

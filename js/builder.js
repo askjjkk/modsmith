@@ -1,5 +1,6 @@
 // Подбор модов: база + темы, версии под (minecraft, загрузчик), зависимости, конфликты.
 import { BASE, GROUPS, SIZES, VANILLA_PLUS } from './themes.js'
+import { KNOWN_SLUGS, isPlatform, readJarMeta } from './jarmeta.js'
 
 export const loaderList = loader => (loader === 'quilt' ? ['quilt', 'fabric'] : [loader])
 
@@ -45,7 +46,7 @@ const incompatibleIds = version => (version.dependencies || [])
   .filter(d => d.dependency_type === 'incompatible' && d.project_id).map(d => d.project_id)
 
 export class PackBuilder {
-  constructor(api, { version, loader }) {
+  constructor(api, { version, loader }, { readMeta = readJarMeta } = {}) {
     this.api = api
     this.version = version
     this.loader = loader
@@ -53,6 +54,8 @@ export class PackBuilder {
     this.chosen = new Map() // projectId -> mod
     this.groups = new Map() // groupId -> projectId
     this.skipped = []
+    this.readMeta = readMeta
+    this.metaCache = new Map()
   }
 
   async versionFor(projectId) {
@@ -154,6 +157,96 @@ export class PackBuilder {
   mods() {
     return [...this.chosen.values()]
   }
+
+  remove(projectId, why) {
+    const mod = this.chosen.get(projectId)
+    if (!mod) return
+    this.chosen.delete(projectId)
+    for (const [g, id] of this.groups) if (id === projectId) this.groups.delete(g)
+    this.skipped.push({ title: mod.project.title, why })
+  }
+
+  async metaOf(mod) {
+    if (!this.metaCache.has(mod.project.id)) {
+      this.metaCache.set(mod.project.id, this.readMeta(mod.file.url, mod.file.size))
+    }
+    return this.metaCache.get(mod.project.id)
+  }
+
+  // Ищет на Modrinth мод, который внутри своего jar называется depId
+  async findProvider(depId) {
+    const slugs = [...new Set([KNOWN_SLUGS[depId], depId, depId.replace(/_/g, '-')].filter(Boolean))]
+    const [direct, found] = await Promise.all([
+      this.api.projects(slugs),
+      this.api.search(depId.replace(/_/g, ' '), { version: this.version, loaders: this.loaders, limit: 5 }),
+    ])
+    const seen = new Map()
+    for (const p of [...direct, ...found]) if (p && !seen.has(p.id)) seen.set(p.id, p)
+    for (const p of [...seen.values()].slice(0, 5)) {
+      const v = await this.versionFor(p.id)
+      const file = v && fileOf(v)
+      if (!file) continue
+      // мод из словаря известных библиотек принимаем по адресу: внутри он бывает «архивом в архиве»
+      if (KNOWN_SLUGS[depId] === p.slug) return p
+      const meta = await this.readMeta(file.url, file.size)
+      if (meta?.ids.includes(depId)) return p
+    }
+    return null
+  }
+
+  /**
+   * Проверка «что внутри»: читает fabric.mod.json / mods.toml каждого мода.
+   * Чего не хватает — ищет и добавляет; не нашлось — убирает мод, которому это нужно.
+   */
+  async verifyJars(onProgress = () => {}) {
+    for (let round = 0; round < 4; round++) {
+      const mods = this.mods()
+      const metas = await pool(mods, 6, m => this.metaOf(m))
+      onProgress(round)
+      const provided = new Set()
+      mods.forEach((m, i) => {
+        const meta = metas[i]
+        if (meta) [...meta.ids, ...meta.nested].forEach(id => provided.add(id))
+        for (const [id, slug] of Object.entries(KNOWN_SLUGS)) if (slug === m.project.slug) provided.add(id)
+      })
+      const missing = new Map() // depId -> [mod]
+      mods.forEach((m, i) => {
+        for (const dep of metas[i]?.depends || []) {
+          if (isPlatform(dep) || provided.has(dep)) continue
+          if (!missing.has(dep)) missing.set(dep, [])
+          missing.get(dep).push(m)
+        }
+      })
+      if (!missing.size) return
+      for (const [dep, needers] of missing) {
+        const provider = await this.findProvider(dep)
+        const section = { id: 'deps', label: 'Библиотеки и зависимости', color: '#8d95b0' }
+        const ok = provider && (this.chosen.has(provider.id)
+          || await this.tryAdd(provider, section, `нужен для ${needers[0].project.title}`, { allowLibrary: true }))
+        if (ok) {
+          const added = this.chosen.get(provider.id)
+          if (added && !added.parentId) added.parentId = needers[0].project.id
+          if (added) added.dep = true
+        } else {
+          for (const m of needers) this.remove(m.project.id, `требует мод «${dep}», которого нет под ${this.version} ${this.loader}`)
+        }
+      }
+    }
+  }
+}
+
+// Выполняет fn для элементов, не больше limit одновременно; порядок результатов сохраняется
+async function pool(items, limit, fn) {
+  const out = new Array(items.length)
+  let next = 0
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++
+      out[i] = await fn(items[i]).catch(() => null)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return out
 }
 
 /**
@@ -162,7 +255,7 @@ export class PackBuilder {
  * emit: события для интерфейса {type:'stage'|'mod'|'progress', ...}
  */
 export async function buildPack(opts, api, emit = () => {}) {
-  const b = new PackBuilder(api, opts)
+  const b = new PackBuilder(api, opts, opts.readMeta ? { readMeta: opts.readMeta } : {})
   b.onMod = mod => emit({ type: 'mod', mod })
   const progress = (value, text) => emit({ type: 'progress', value, text })
 
@@ -212,7 +305,9 @@ export async function buildPack(opts, api, emit = () => {}) {
     if (!progressed) break
   }
 
-  progress(0.94, 'Проверяю загрузчик…')
+  progress(0.9, 'Заглядываю внутрь модов: что им нужно на самом деле…')
+  await b.verifyJars()
+  progress(0.96, 'Проверяю загрузчик…')
   const loaderVersion = await api.loaderVersion(opts.loader, opts.version)
   progress(1, 'Готово')
   return { mods: b.mods(), skipped: b.skipped, loaderVersion, version: opts.version, loader: opts.loader }
