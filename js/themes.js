@@ -29,7 +29,7 @@ export const THEMES = [
   { id: 'fantasy', label: 'Фэнтези', color: '#ce93d8', stems: ['фэнтез', 'фентез', 'сказ', 'эльф', 'гном', 'fantasy', 'elf', 'elves', 'dwarf'], categories: [], queries: ['fantasy'] },
   { id: 'building', label: 'Строительство', color: '#d7a86e', stems: ['строит', 'постро', 'стройк', 'build'], categories: ['decoration'], queries: ['building blocks', 'building'] },
   { id: 'decor', label: 'Декор', color: '#f4a261', stems: ['декор', 'мебел', 'интерьер', 'уют', 'decor', 'furniture', 'cozy'], categories: ['decoration'], queries: ['furniture', 'decoration'], pinned: ['supplementaries'] },
-  { id: 'food', label: 'Еда', color: '#ffcc80', stems: ['еда', 'еды', 'еду', 'готовк', 'кулинар', 'кухн', 'food', 'cook', 'kitchen'], categories: ['food'], queries: ['food', 'cooking'], pinned: ['farmers-delight'] },
+  { id: 'food', label: 'Еда', color: '#ffcc80', stems: ['еда', 'еды', 'еду', 'едой', 'еде', 'готовк', 'кулинар', 'кухн', 'food', 'cook', 'kitchen'], categories: ['food'], queries: ['food', 'cooking'], pinned: ['farmers-delight'] },
   { id: 'farming', label: 'Фермерство', color: '#aed581', stems: ['ферм', 'урожа', 'огород', 'картошк', 'farm', 'crop', 'harvest'], categories: ['food'], queries: ['farming', 'crops'] },
   { id: 'seasons', label: 'Сезоны и погода', color: '#80deea', stems: ['сезон', 'погод', 'зима', 'зимн', 'season', 'weather'], categories: [], queries: ['seasons', 'weather'], pinned: ['serene-seasons'] },
   { id: 'storage', label: 'Хранение', color: '#bcaaa4', stems: ['сундук', 'хранен', 'рюкзак', 'storage', 'backpack', 'chest'], categories: ['storage'], queries: ['storage', 'backpacks'], pinned: ['sophisticated-backpacks'] },
