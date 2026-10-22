@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Modsmith: сборщик модпаков Minecraft по описанию</title>
+<meta name="description" content="Опишите сборку мечты словами, и Modsmith соберёт совместимый модпак Minecraft: .mrpack для Modrinth App и архив модов.">
+<meta property="og:title" content="Modsmith: модпак Minecraft по описанию">
+<meta property="og:description" content="«Хардкор с магией и драконами на 1.20.1» → готовая совместимая сборка за 15 секунд.">
+<meta property="og:image" content="https://askjjkk.github.io/modsmith/assets/og.png">
+<meta name="theme-color" content="#0b1020">
+<link rel="icon" href="assets/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&family=Pixelify+Sans:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha512-XMVd28F1oH/O71fzwBnV7HucLxVwtxf26XV8P4wPk26EDxuGZ91N8bsOttmnomcCD3CS5ZMRL50H0GgOHvegtg==" crossorigin="anonymous" referrerpolicy="no-referrer" defer></script>
+<script type="module" src="js/ui.js"></script>
+</head>
+<body>
+<canvas id="sky" aria-hidden="true"></canvas>
+<div class="cubes" aria-hidden="true"></div>
+
+<header class="hero">
+  <p class="badge"><span class="dot"></span>Бесплатно, без регистрации, моды с Modrinth</p>
+  <h1 class="logo" aria-label="Modsmith"><span class="glint">Modsmith</span></h1>
+  <p class="tagline">Опиши сборку мечты словами. Я подберу моды, проверю совместимость и отдам готовый модпак.</p>
+</header>
+
+<main>
+  <section class="forge glass" aria-label="Описание сборки">
+    <label class="field-label" for="prompt">Какую сборку хочешь?</label>
+    <div class="prompt-wrap">
+      <textarea id="prompt" rows="3" maxlength="400" spellcheck="false"></textarea>
+      <span class="typer" aria-hidden="true"></span>
+    </div>
+    <div class="chips" aria-live="polite"></div>
+
+    <div class="controls">
+      <div class="control">
+        <span class="control-label">Версия</span>
+        <div class="select">
+          <select id="version" aria-label="Версия Minecraft"><option>Загружаю…</option></select>
+        </div>
+      </div>
+      <div class="control">
+        <span class="control-label">Загрузчик</span>
+        <div class="seg" id="loader" role="radiogroup" aria-label="Загрузчик модов">
+          <button type="button" role="radio" data-value="fabric">Fabric</button>
+          <button type="button" role="radio" data-value="forge">Forge</button>
+          <button type="button" role="radio" data-value="neoforge">NeoForge</button>
+          <button type="button" role="radio" data-value="quilt">Quilt</button>
+          <span class="seg-pill" aria-hidden="true"></span>
+        </div>
+      </div>
+      <div class="control">
+        <span class="control-label">Размер</span>
+        <div class="seg" id="size" role="radiogroup" aria-label="Размер сборки">
+          <button type="button" role="radio" data-value="light">Лёгкая</button>
+          <button type="button" role="radio" data-value="normal">Обычная</button>
+          <button type="button" role="radio" data-value="big">Большая</button>
+          <span class="seg-pill" aria-hidden="true"></span>
+        </div>
+      </div>
+      <div class="control toggles">
+        <label class="lever"><input type="checkbox" id="perf" checked><span class="lever-track"><span class="lever-knob"></span></span>Оптимизация</label>
+        <label class="lever"><input type="checkbox" id="qol" checked><span class="lever-track"><span class="lever-knob"></span></span>Удобства</label>
+      </div>
+    </div>
+
+    <button class="craft" id="craft" type="button"><span class="craft-shine" aria-hidden="true"></span><span class="craft-text">Скрафтить сборку</span></button>
+  </section>
+
+  <section class="crafting glass" id="crafting" hidden aria-live="polite">
+    <div class="table">
+      <div class="grid" id="grid"></div>
+      <div class="arrow" aria-hidden="true"></div>
+      <div class="slot result-slot" id="result-slot"><span class="pack-icon"></span></div>
+    </div>
+    <div class="xp">
+      <div class="xp-level" id="xp-level">0</div>
+      <div class="xp-bar"><div class="xp-fill" id="xp-fill"></div></div>
+      <p class="xp-text" id="xp-text">Разжигаю горн…</p>
+    </div>
+  </section>
+
+  <section class="result" id="result" hidden>
+    <div class="summary glass">
+      <div class="stats" id="stats"></div>
+      <div class="actions">
+        <button class="btn btn-primary" id="dl-mrpack" type="button"><span class="btn-fill"></span><span class="btn-text">Скачать .mrpack</span></button>
+        <button class="btn" id="dl-zip" type="button"><span class="btn-fill"></span><span class="btn-text">Архив с модами</span></button>
+        <button class="btn btn-ghost" id="share" type="button"><span class="btn-text">Поделиться</span></button>
+      </div>
+      <p class="hint">.mrpack открывается в Modrinth App, Prism Launcher и ATLauncher, моды скачаются сами. Архив подойдёт для TLauncher: распакуйте папку mods в .minecraft.</p>
+    </div>
+    <div id="sections"></div>
+    <details class="skipped glass" id="skipped" hidden>
+      <summary>Не подошли под эту версию</summary>
+      <ul id="skipped-list"></ul>
+    </details>
+  </section>
+</main>
+
+<footer class="footer">
+  <p>Сделал <a href="https://github.com/askjjkk" target="_blank" rel="noopener">askjjkk</a>. Данные и файлы модов: <a href="https://modrinth.com" target="_blank" rel="noopener">Modrinth</a>. Не связано с Mojang и Microsoft.</p>
+  <p><a href="https://github.com/askjjkk/modsmith" target="_blank" rel="noopener">Исходный код</a></p>
+</footer>
+
+<div class="toast" id="toast" role="status"></div>
+</body>
+</html>

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Modsmith: тесты</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; background: #10131c; color: #e8ecf6; padding: 24px; }
+  .ok { color: #7ee081; } .fail { color: #ff6b6b; white-space: pre-wrap; }
+  h1 { font-size: 18px; }
+</style>
+</head>
+<body>
+<h1 id="summary">Тесты выполняются…</h1>
+<div id="out"></div>
+<script type="module">import(`./js/tests.js?${Date.now()}`)</script>
+</body>
+</html>
