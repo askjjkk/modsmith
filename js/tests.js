@@ -280,6 +280,11 @@ Caused by: java.lang.NoClassDefFoundError: com/cobblemon/mod/common/battles/disp
   eq(d.culprits.map(c => c.mod.project.id).sort(), ['a', 'b'])
   eq(d.dependents.map(c => c.mod.project.id), ['d'])
 })
+test('доктор не винит моды за безобидные предупреждения mixin', () => {
+  const log = `[WARN]: Method overwrite conflict for method_21740 in modernfix-common.mixins.json:BiomeMixin from mod modernfix, previously written by lithium. Skipping method.
+[ERROR]: Mixin apply failed sdmshop.mixins.json:TextFieldMixin from mod sdmshop`
+  eq(findCulprits(log).map(c => c.id), ['sdmshop'])
+})
 test('доктор понимает окно «Incompatible mods found»', () => {
   const text = "Mod 'Wizards (RPG Series)' (wizards) 3.1.3+1.21.1 requires any version of structure_pool_api, which is missing!"
   eq(findCulprits(text).map(c => c.id), ['wizards'])

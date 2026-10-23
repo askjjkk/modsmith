@@ -15,7 +15,11 @@ export function findCulprits(text) {
     add(m[2], `ему нужен «${m[3]}», которого нет`)
   }
   for (const m of text.matchAll(/Requested by: '([^']+)'/g)) add(m[1], 'не хватает обязательной зависимости')
-  for (const m of text.matchAll(/(?:from mod|by mod) '?([a-z0-9_\-]+)'?/gi)) add(m[1], 'ошибка при встраивании в игру (mixin)')
+  // «from mod X» бывает и в безобидных предупреждениях — виним только строки с настоящей ошибкой встраивания
+  for (const line of text.split(/\r?\n/)) {
+    if (!/ERROR|Mixin apply failed|MixinApplyError|InvalidInjection|Critical injection/.test(line)) continue
+    for (const m of line.matchAll(/(?:from mod|by mod) '?([a-z0-9_\-]+)'?/gi)) add(m[1], 'ошибка при встраивании в игру (mixin)')
+  }
   for (const m of text.matchAll(/Mod (?:ID|File)?:? ?'?([a-z0-9_\-]+)'? .*?(?:failed|crashed|errored)/gi)) add(m[1], 'сломался при загрузке')
   return [...found.entries()].map(([id, why]) => ({ id, why }))
 }

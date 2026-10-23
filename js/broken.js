@@ -3,6 +3,7 @@
 export const BROKEN = {
   'anarchy-rpg': 'падает на старте со Spell Engine 1.10 (проверено запуском)',
   cobbleboss: 'падает без Cobblemon (проверено запуском)',
+  'sdm-shop': 'падает при запуске: нужен SDMCore, которого он не объявляет (проверено запуском)',
 }
 
 const KEY = 'modsmith-blocked'

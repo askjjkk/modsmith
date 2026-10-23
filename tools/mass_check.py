@@ -40,14 +40,25 @@ def jar_info(path: Path) -> dict:
         return {"ids": [norm(path.stem)], "depends": [], "name": path.stem}
 
 
+# Сервер дошёл до чтения своих настроек: код запуска всех модов к этому моменту уже выполнен.
+# Дальше без принятой EULA некоторые моды (owo-lib) падают — это не ошибка сборки.
+SUCCESS = ("You need to agree to the EULA", "Done (", "Failed to load properties from file: server.properties")
+
+
+def started(log: str) -> bool:
+    return any(s in log for s in SUCCESS)
+
+
 def run_server(work: Path, server_jar: Path) -> str:
-    proc = subprocess.Popen(["java", "-Xmx6G", "-jar", str(server_jar), "nogui"], cwd=work, stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
+    # headless: окна-«сторожа» модов (owo-sentinel и т.п.) не откроются и не повесят проверку
+    proc = subprocess.Popen(["java", "-Djava.awt.headless=true", "-Xmx6G", "-jar", str(server_jar), "nogui"], cwd=work,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                            errors="replace")
     lines = []
     try:
         for line in proc.stdout:
             lines.append(line.rstrip())
-            if "You need to agree to the EULA" in line or "Done (" in line:
+            if any(s in line for s in SUCCESS):
                 break
             if "Could not execute entrypoint" in line or "Incompatible mods found" in line or "Crash Report" in line \
                     or "Mixin apply failed" in line or "MixinApplyError" in line:
@@ -75,8 +86,11 @@ def culprits(log: str, by_id: dict) -> dict:
         add(m.group(1), "упал при запуске")
     for m in re.finditer(r"Mod '[^']+' \(([^)]+)\) \S+ requires .*?(\S+), which is missing", log):
         add(m.group(1), f"нет зависимости {m.group(2)}")
-    for m in re.finditer(r"from mod ([a-z0-9_\-]+)", log, re.I):
-        add(m.group(1), "ошибка mixin")
+    # «from mod X» бывает и в безобидных WARN — виним только строки с настоящей ошибкой встраивания
+    for line in log.splitlines():
+        if re.search(r"ERROR|Mixin apply failed|MixinApplyError|InvalidInjection|Critical injection", line):
+            for m in re.finditer(r"from mod ([a-z0-9_\-]+)", line, re.I):
+                add(m.group(1), "ошибка mixin")
     searching = False
     for line in log.splitlines():
         if re.match(r"^\s*(Caused by:|Suppressed:|[\w.$]+(Exception|Error)\b)", line):
@@ -130,19 +144,33 @@ def check_pack(index_path: Path, work_root: Path, server_jars: dict) -> dict:
         by_id = {i: name for name, info in infos.items() for i in info["ids"]}
         log = run_server(work, server_jar)
         (work / f"try{attempt}.log").write_text(log, encoding="utf-8")
-        if "You need to agree to the EULA" in log or "Done (" in log:
+        if started(log):
             return {"pack": index_path.stem, "ok": True, "attempts": attempt + 1, "mods": len(infos), "removed": removed}
         bad = culprits(log, by_id)
         if not bad:
             return {"pack": index_path.stem, "ok": False, "attempts": attempt + 1, "mods": len(infos), "removed": removed,
                     "tail": log.splitlines()[-25:]}
+        gone = set()
         for name, why in bad.items():
             removed.append({"file": name, "project": project_of.get(name), "name": infos[name]["name"], "why": why})
             (mods / name).unlink(missing_ok=True)
+            gone.update(infos[name]["ids"])
+        # кому были нужны убранные моды — тоже убираем (иначе следующий запуск упадёт на зависимостях)
+        changed = True
+        while changed:
+            changed = False
+            for name, info in infos.items():
+                if (mods / name).exists() and any(d in gone for d in info["depends"]):
+                    (mods / name).unlink()
+                    gone.update(info["ids"])
+                    removed.append({"file": name, "project": project_of.get(name), "name": info["name"],
+                                    "why": "нужен убранный мод", "dependent": True})
+                    changed = True
     return {"pack": index_path.stem, "ok": False, "attempts": 8, "removed": removed}
 
 
 def main(work_root: str) -> None:
+    sys.stdout.reconfigure(encoding="utf-8")
     work_root = Path(work_root)
     work_root.mkdir(parents=True, exist_ok=True)
     results, server_jars = [], {}
