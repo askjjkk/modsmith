@@ -10,30 +10,39 @@ export function createApi({ fetchImpl = (...a) => fetch(...a), concurrency = 6 }
   const cache = new Map()
   let active = 0
   const queue = []
+  let pauseUntil = 0 // общий «стоп» после ответа 429: ждут все запросы, а не только упавший
 
-  const slot = () => new Promise(resolve => {
-    const go = () => { active++; resolve() }
-    active < concurrency ? go() : queue.push(go)
-  })
+  const slot = async () => {
+    while (Date.now() < pauseUntil) await sleep(pauseUntil - Date.now())
+    return new Promise(resolve => {
+      const go = () => { active++; resolve() }
+      active < concurrency ? go() : queue.push(go)
+    })
+  }
   const release = () => { active--; queue.length && queue.shift()() }
 
   async function getJson(url) {
     if (cache.has(url)) return cache.get(url)
     const p = (async () => {
-      for (let attempt = 0; attempt < 4; attempt++) {
+      let limited = 0
+      for (let attempt = 0; attempt < 4 + limited; attempt++) {
         await slot()
         let res
         try {
           res = await fetchImpl(url)
         } catch {
           release()
-          if (attempt === 3) throw new ApiError('Нет связи с Modrinth. Проверьте интернет и попробуйте ещё раз.')
+          if (attempt >= 3 + limited) throw new ApiError('Нет связи с Modrinth. Проверьте интернет и попробуйте ещё раз.')
           await sleep(800 * (attempt + 1))
           continue
         }
         release()
         if (res.status === 429) {
-          await sleep((Number(res.headers.get('x-ratelimit-reset')) || 2) * 1000)
+          // лимит 300 запросов в минуту: ждём нарастающе (2, 4, 8, 16, 30 с), до 6 раз
+          if (limited >= 6) throw new ApiError('Modrinth просит подождать: слишком много запросов. Попробуйте через минуту.')
+          const wait = (Number(res.headers.get('x-ratelimit-reset')) || Math.min(30, 2 ** (limited + 1))) * 1000
+          pauseUntil = Math.max(pauseUntil, Date.now() + wait)
+          limited++
           continue
         }
         if (res.status === 404) return null

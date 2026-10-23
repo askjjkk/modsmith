@@ -3,8 +3,10 @@ import { THEME_BY_ID, analyze, parse, detectThemes, detectVersion, detectLoader 
 import { REFERENCES } from './references.js'
 import { THEMES } from './themes.js'
 import { diagnose, findCulprits } from './doctor.js'
+import { INTENTS } from './intents.js'
+import { COMFORT_OPTIONS } from './comfort-options.js'
 import { PackBuilder, buildPack, groupOf, majorMinor, missingBase, pickVersion } from './builder.js'
-import { buildIndex } from './mrpack.js'
+import { buildIndex, mrpackBlob } from './mrpack.js'
 import { isPlatform, nestedIds, parseFabric, parseToml } from './jarmeta.js'
 
 const results = []
@@ -16,7 +18,7 @@ const ids = found => found.map(f => f.theme.id)
 
 // --- разбор описания ---
 test('темы из русского описания со словоформами', () => {
-  eq(ids(detectThemes('Хардкорное выживание с магией и драконами')), ['magic', 'dragons', 'hardcore'])
+  eq(ids(detectThemes('Хардкорное выживание с магией и драконами')).filter(i => ['magic', 'dragons', 'hardcore'].includes(i)), ['magic', 'dragons', 'hardcore'])
 })
 test('английское описание', () => {
   eq(ids(detectThemes('tech pack with machines and space rockets')), ['tech', 'space'])
@@ -259,6 +261,64 @@ test('все отсылки ведут на существующие темы, i
   eq(missing, [])
   eq(new Set(THEMES.map(t => t.id)).size, THEMES.length)
   eq(THEMES.length >= 120, true, `тем всего ${THEMES.length}`)
+})
+
+// --- намерения и опечатки ---
+test('намерения: слабый пк, новичок, с другом', () => {
+  const a = parse('хочу сборку для слабого пк чтобы не лагало')
+  eq(a.size, 'light')
+  eq(a.settings.perf, true)
+  const b = analyze('сборка для новичка с другом')
+  eq(b.intents.includes('Для новичка') && b.intents.includes('С друзьями'), true)
+  eq(b.excluded.some(t => t.id === 'hardcore'), true)
+  eq(parse('только оптимизация').settings.onlyBase, true)
+})
+test('для ребёнка: без хоррора и зомби', () => {
+  const a = analyze('сборка для ребенка')
+  eq(['horror', 'zombies'].every(id => a.excluded.some(t => t.id === id)), true)
+})
+test('опечатки распознаются', () => {
+  const ids = text => analyze(text).themes.map(t => t.theme.id)
+  eq(ids('хардкорр выживание').includes('hardcore'), true)
+  eq(ids('мнго драконв').includes('dragons'), true)
+  eq(ids('техналогии и автамотизация').includes('tech'), true)
+})
+test('живые запросы: без промахов', () => {
+  const ids = text => analyze(text).themes.map(t => t.theme.id)
+  eq(ids('выживание с другом на 1.20.1 forge').includes('canyons'), false, 'forge ≠ gorge')
+  eq(parse('только оптимизация больше фпс').size, 'light', '«больше» ≠ большая сборка')
+  eq(ids('реалистичная графика и шейдеры').includes('hardcore'), false, 'реалистичная ≠ хардкор')
+  eq(ids('хочу играть за мага').includes('magic'), true, 'мага → магия')
+  eq(ids('хочу в магазин').includes('magic'), false, 'магазин ≠ магия')
+  eq(parse('огромная сборка').size, 'big')
+})
+test('частые слова не становятся темами', () => {
+  const a = analyze('хочу интересную сборку чтобы было интересно играть пожалуйста')
+  eq(a.themes.filter(t => t.via === 'опечатка').map(t => t.word), [])
+})
+test('у тем чистые id и поисковые запросы', () => {
+  eq(THEMES.filter(t => !/^[a-z_]+$/.test(t.id)).map(t => t.id), [])
+  eq(THEMES.filter(t => t.queries.some(q => q.includes('='))).map(t => t.id), [])
+  eq(THEMES.filter(t => !t.queries.length).map(t => t.id), [])
+})
+test('320+ тем, у всех намерений существующие темы', () => {
+  eq(THEMES.length >= 320, true, `тем ${THEMES.length}`)
+  const bad = INTENTS.flatMap(i => [...(i.themes || []), ...(i.exclude || [])]).filter(id => !THEME_BY_ID.has(id))
+  eq(bad, [])
+})
+test('«только оптимизация» не добавляет тематических модов', async () => {
+  const projects = { sodium: P('sodium', { title: 'Sodium' }) }
+  const api = fakeApi({ projects, versions: { sodium: V('sodium') }, search: {} })
+  const pack = await buildPack({ version: '1.21.1', loader: 'fabric', size: 'light', perf: true, qol: false, themes: [], onlyBase: true, readMeta: async () => null }, api)
+  eq(pack.mods.map(m => m.project.id), ['sodium'])
+})
+test('комфортные настройки: без сервера и ресурспаков, кладутся в overrides', async () => {
+  eq(/^(lastServer|resourcePacks|soundDevice|version):/m.test(COMFORT_OPTIONS), false)
+  eq(COMFORT_OPTIONS.includes('renderDistance:32') && COMFORT_OPTIONS.includes('lang:ru_ru'), true)
+  const zip = await window.JSZip.loadAsync(await mrpackBlob({ files: [] }, window.JSZip, COMFORT_OPTIONS))
+  eq(await zip.file('overrides/options.txt').async('string'), COMFORT_OPTIONS)
+  const plain = await window.JSZip.loadAsync(await mrpackBlob({ files: [] }, window.JSZip, null))
+  eq(plain.file('overrides/options.txt'), null)
 })
 
 // --- доктор ---

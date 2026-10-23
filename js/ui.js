@@ -4,6 +4,7 @@ import { THEME_BY_ID, parse } from './parser.js'
 import { THEMES } from './themes.js'
 import { addBlocked, allBlocked } from './broken.js'
 import { diagnose } from './doctor.js'
+import { COMFORT_OPTIONS } from './comfort-options.js'
 import { buildPack } from './builder.js'
 import { LOADER_NAMES, buildIndex, modsZipBlob, mrpackBlob } from './mrpack.js'
 import { startSky } from './bg.js'
@@ -201,16 +202,22 @@ function renderChips() {
     box.append(hint)
   }
   if (text.length > 2) box.append(addThemeControl())
-  const refs = lastParse.references.filter(r => !r.negative)
-  if (refs.length) {
+  const refs = lastParse.references.filter(r => !r.negative).map(x => x.label)
+  const understood = [...refs, ...(lastParse.intents || [])]
+  const typos = themes.filter(x => x.via === 'опечатка').map(x => `«${x.word}» → ${x.theme.label}`)
+  if (understood.length || typos.length) {
     const r = document.createElement('p')
     r.className = 'refs'
-    r.textContent = `Узнал отсылку: ${refs.map(x => x.label).join(', ')}. Темы взял оттуда, лишнее можно снять кликом.`
+    r.textContent = [
+      understood.length ? `Понял: ${understood.join(', ')}.` : '',
+      typos.length ? `Исправил опечатки: ${typos.join(', ')}.` : '',
+      'Лишнее можно снять кликом.',
+    ].filter(Boolean).join(' ')
     box.append(r)
   }
 }
 
-// «+ тема»: выбрать любую из 120+ тем вручную
+// «+ тема»: выбрать любую из 320+ тем вручную
 function addThemeControl() {
   const wrap = document.createElement('span')
   wrap.className = 'chip-add'
@@ -238,6 +245,9 @@ function onInput() {
     if (p.version) setVersion(p.version, true)
     if (p.loader && p.loader !== state.loader) setSeg('loader', p.loader, true)
     if (p.size && p.size !== state.size) setSeg('size', p.size, true)
+    // «для слабого пк», «только оптимизация» включают оптимизацию
+    if (p.settings?.perf && !$('#perf').checked) { $('#perf').checked = true }
+    if (p.settings?.qol && !$('#qol').checked) { $('#qol').checked = true }
   }, 120)
 }
 
@@ -308,6 +318,7 @@ async function craft() {
   const opts = {
     version: $('#version').value, loader: state.loader, size: state.size,
     perf: $('#perf').checked, qol: $('#qol').checked, themes, excluded, blocked: allBlocked(),
+    onlyBase: !!lastParse.settings?.onlyBase && !manual.size,
   }
   try {
     const pack = await buildPack(opts, api, emit)
@@ -449,6 +460,11 @@ function showResult(pack) {
   state.pack = pack
   state.enabled = new Set(pack.mods.map(m => m.project.id))
   renderStats()
+  const empty = $('#empty-themes')
+  empty.hidden = !pack.emptyThemes?.length
+  empty.textContent = pack.emptyThemes?.length
+    ? `По темам «${pack.emptyThemes.join('», «')}» под ${pack.version} ${LOADER_NAMES[pack.loader]} подходящих модов не нашлось. Попробуйте другую версию или загрузчик (чаще всего модов больше всего на 1.20.1 Forge и 1.21.1 Fabric).`
+    : ''
 
   const order = []
   for (const m of pack.mods) if (!order.some(s => s.id === m.section.id)) order.push(m.section)
@@ -507,10 +523,13 @@ function download(blob, name) {
   setTimeout(() => URL.revokeObjectURL(a.href), 30000)
 }
 
+// «Комфортные настройки игры»: options.txt кладётся в сборку, только если включён переключатель
+const comfortOptions = () => ($('#comfort').checked ? COMFORT_OPTIONS : null)
+
 async function downloadMrpack() {
   const pack = enabledPack()
   const index = buildIndex({ ...pack, summary: `Собрано на Modsmith по описанию: ${pack.text}` })
-  download(await mrpackBlob(index, window.JSZip), fileName(pack, 'mrpack'))
+  download(await mrpackBlob(index, window.JSZip, comfortOptions()), fileName(pack, 'mrpack'))
   toast('Готово! Открой файл двойным кликом в Modrinth App или перетащи в Prism Launcher.')
 }
 
@@ -523,7 +542,7 @@ async function downloadZip() {
     const { blob, failed } = await modsZipBlob(pack, window.JSZip, k => {
       fill.style.width = `${Math.round(k * 100)}%`
       label.textContent = `Скачиваю ${Math.round(k * 100)}%`
-    })
+    }, undefined, comfortOptions())
     download(blob, fileName(pack, 'zip'))
     toast(failed.length ? `Не скачались: ${failed.join(', ')}. Остальное в архиве.` : 'Архив готов: распакуй папку mods в .minecraft.', !!failed.length)
   } catch {

@@ -161,6 +161,14 @@ button.chip:hover { transform: translateY(-2px); filter: brightness(1.15); }
 .chip-add input:focus { border-color: var(--amethyst); width: 230px; }
 .refs { flex-basis: 100%; margin: 4px 0 0; font-size: 14px; color: var(--diamond); animation: rise .4s var(--smooth) both; }
 
+.my-options { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; flex-basis: 100%; }
+.muted-note { color: var(--muted); font-weight: 500; }
+.empty-themes { color: var(--gold); }
+.my-options.on .options-btn { border-style: solid; border-color: rgba(125, 255, 106, .55); color: var(--xp); }
+.options-clear { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 15px; padding: 4px 6px; }
+.options-clear:hover { color: var(--redstone); }
+.options-hint { font-size: 13px; color: var(--muted); }
+
 .doctor { margin-top: 30px; padding: 24px; }
 .doctor h2 { margin: 0 0 6px; font: 700 22px var(--body); }
 .doctor p { margin: 0 0 14px; color: var(--muted); max-width: 760px; }

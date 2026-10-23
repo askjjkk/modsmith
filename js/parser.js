@@ -1,6 +1,7 @@
 // Разбор описания: темы (с отрицаниями «без магии»), отсылки («как в Скайриме»), версия, загрузчик, размер.
 import { THEMES } from './themes.js'
 import { REFERENCES } from './references.js'
+import { INTENTS } from './intents.js'
 
 const LOADERS = [
   ['neoforge', ['neoforge', 'neo forge', 'неофордж', 'неофорж']],
@@ -88,8 +89,66 @@ export function analyze(text) {
       if (isNeg) { if (!themes.has(id)) excluded.set(id, theme) } else if (!themes.has(id) && !excluded.has(id)) themes.set(id, { theme, word: label, via: label })
     }
   }
+  // типовые фразы: «для слабого пк», «для новичка», «с друзьями»… — темы + настройки
+  const intents = []
+  const settings = {}
+  for (const intent of INTENTS) {
+    const hits = intent.stems.flatMap(stem => stemHits(stem, toks, t))
+    if (!hits.length) continue
+    // «не для новичка» — пропускаем; фразы вроде «без хардкора» сами содержат отрицание
+    if (hits.every(h => neg.has(h.pos)) && !intent.stems.some(s => /^(без|не) /.test(s))) continue
+    intents.push(intent.label)
+    for (const id of intent.exclude || []) { const th = THEME_BY_ID.get(id); if (th) excluded.set(id, th) }
+    for (const id of intent.themes || []) {
+      const th = THEME_BY_ID.get(id)
+      if (th && !themes.has(id) && !excluded.has(id)) themes.set(id, { theme: th, word: intent.label, via: intent.label })
+    }
+    for (const k of ['size', 'perf', 'qol', 'onlyBase']) if (intent[k] !== undefined && settings[k] === undefined) settings[k] = intent[k]
+  }
+
+  // опечатки: «магея», «хардкорр», «дракона» с ошибкой — ищем тему с отличием в одну букву
+  const matched = new Set([...themes.values()].map(x => normalize(x.word)))
+  toks.forEach((tok, pos) => {
+    if (tok.length < 5 || STOPWORDS.test(tok) || matched.has(tok) || neg.has(pos)) return
+    if (FUZZY.some(([stem]) => tok.startsWith(stem))) return // слово и так распознаётся без исправлений
+    for (const [stem, theme] of FUZZY) {
+      if (themes.has(theme.id) || excluded.has(theme.id)) continue
+      // отличие только в последней букве основы — это окончание другого слова («классная» ≠ «классы»), не опечатка
+      if (tok.startsWith(stem.slice(0, -1))) continue
+      if (closeEnough(tok, stem)) { themes.set(theme.id, { theme, word: tok, via: 'опечатка' }); break }
+    }
+  })
+
   for (const id of excluded.keys()) themes.delete(id)
-  return { themes: [...themes.values()], excluded: [...excluded.values()], references }
+  return { themes: [...themes.values()], excluded: [...excluded.values()], references, intents, settings }
+}
+
+// частые слова запросов: их не «исправляем» в темы
+const STOPWORDS = /^(forge|fabric|neoforge|quilt|фордж|форж|фабрик|сборк|хочу|хотел|чтобы|чтоб|было|интерес|играть|поиграть|модов|моды|модам|майнкрафт|minecraft|версия|версии|нужна|нужно|нужен|можно|очень|много|какой|какую|которы|сделай|собери|пожалуйст|давай|побольше|поменьше|разных|разные|немного|просто|лучше|самый|самая|самые|чтобы|норм|нормальн|вообще|короче|типа|where|which|would|should|could|please|really|modpack|something)/
+
+// [основа, тема] для поиска опечаток: только «длинные» основы, без «=целое слово» и фраз
+const FUZZY = THEMES.flatMap(th => th.stems.filter(s => s.length >= 5 && s[0] !== '=' && !s.includes(' ')).map(s => [normalize(s), th]))
+
+// Отличается ли начало слова от основы ровно на одну букву (замена, лишняя, пропущенная или перестановка)
+export function closeEnough(token, stem) {
+  for (const len of [stem.length - 1, stem.length, stem.length + 1]) {
+    if (len < 4 || len > token.length) continue
+    if (editDistance(token.slice(0, len), stem) === 1) return true
+  }
+  return false
+}
+
+function editDistance(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)])
+  for (let j = 1; j <= b.length; j++) d[0][j] = j
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost)
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1)
+    }
+  }
+  return d[a.length][b.length]
 }
 
 export function detectVersion(text) {
@@ -108,7 +167,7 @@ export function detectLoader(text) {
 export function detectSize(text) {
   const t = normalize(text)
   if (/(легк|мини|небольш|light|small)/.test(t)) return 'light'
-  if (/(огромн|больш|мега|много модов|huge|big|large)/.test(t)) return 'big'
+  if (/(огромн|больш(ая|ую|ой|ие) сборк|мега|много модов|huge|big|large)/.test(t)) return 'big'
   return null
 }
 
@@ -118,8 +177,10 @@ export function parse(text) {
     themes: a.themes,
     excluded: a.excluded,
     references: a.references,
+    intents: a.intents,
+    settings: a.settings,
     version: detectVersion(text),
     loader: detectLoader(text),
-    size: detectSize(text),
+    size: detectSize(text) || a.settings.size || null,
   }
 }

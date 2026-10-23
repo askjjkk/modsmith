@@ -2,9 +2,10 @@
 // pinned: известные хорошие моды темы, проверяются первыми (если есть под версию).
 
 import { EXTRA_THEMES } from './themes-extra.js'
+import { MORE_THEMES } from './themes-more.js'
 
 const CORE_THEMES = [
-  { id: 'magic', label: 'Магия', color: '#b77bff', stems: ['маги', 'волшеб', 'заклин', 'чар', 'колдов', 'ведьм', 'magic', 'spell', 'wizard', 'sorcer', 'witch'], categories: ['magic'], queries: ['magic', 'spells'], pinned: ['irons-spells-n-spellbooks', 'ars-nouveau', 'botania'] },
+  { id: 'magic', label: 'Магия', color: '#b77bff', stems: ['маги', '=мага', '=магом', '=магов', 'волшеб', 'заклин', 'чар', 'колдов', 'ведьм', 'magic', 'spell', 'wizard', 'sorcer', 'witch'], categories: ['magic'], queries: ['magic', 'spells'], pinned: ['irons-spells-n-spellbooks', 'ars-nouveau', 'botania'] },
   { id: 'tech', label: 'Технологии', color: '#ffb547', stems: ['технолог', 'техник', 'техно', 'механизм', 'завод', 'индустр', 'tech', 'industr', 'machine', 'factory'], categories: ['technology'], queries: ['technology', 'machines'], pinned: ['create'] },
   { id: 'automation', label: 'Автоматизация', color: '#ffa04d', stems: ['автоматиз', 'конвейер', 'automat', 'conveyor'], categories: ['technology'], queries: ['automation', 'create addon'], pinned: ['create'] },
   { id: 'energy', label: 'Энергия', color: '#ffe066', stems: ['электр', 'энерг', 'energy', 'electric', 'power'], categories: ['technology'], queries: ['energy', 'power generation'] },
@@ -19,7 +20,7 @@ const CORE_THEMES = [
   { id: 'combat', label: 'Бои', color: '#ff7a59', stems: ['бой', 'бои', 'битв', 'сражен', 'оружи', 'меч', 'combat', 'weapon', 'sword'], categories: ['equipment'], queries: ['combat', 'weapons'], pinned: ['better-combat'] },
   { id: 'armor', label: 'Броня', color: '#b0c4de', stems: ['брон', 'доспех', 'armor', 'armour'], categories: ['equipment'], queries: ['armor'] },
   { id: 'guns', label: 'Оружие', color: '#9e9e9e', stems: ['огнестр', 'пушк', 'ружь', 'винтов', 'пистолет', 'gun', 'rifle', 'firearm'], categories: [], queries: ['guns'] },
-  { id: 'hardcore', label: 'Хардкор', color: '#e53935', stems: ['хардкор', 'сложн', 'выжив', 'реализм', 'реалист', 'hardcore', 'difficult', 'survival', 'realis'], categories: ['game-mechanics'], queries: ['hardcore', 'difficulty', 'survival'], pinned: ['tough-as-nails'] },
+  { id: 'hardcore', label: 'Хардкор', color: '#e53935', stems: ['хардкор', 'сложн', 'выжив', 'hardcore', 'difficult', 'survival'], categories: ['game-mechanics'], queries: ['hardcore', 'difficulty', 'survival'], pinned: ['tough-as-nails'] },
   { id: 'horror', label: 'Хоррор', color: '#8e24aa', stems: ['ужас', 'хоррор', 'страш', 'жутк', 'крип', 'horror', 'scary', 'creepy'], categories: [], queries: ['horror', 'scary'] },
   { id: 'zombies', label: 'Зомби', color: '#6d8f3a', stems: ['зомби', 'апокалип', 'zombie', 'apocalyp'], categories: [], queries: ['zombie', 'apocalypse'] },
   { id: 'worldgen', label: 'Генерация мира', color: '#4caf50', stems: ['биом', 'генерац', 'ландшафт', 'рельеф', 'biome', 'terrain', 'worldgen'], categories: ['worldgen'], queries: ['biomes', 'terrain'], pinned: ['terralith', 'tectonic'] },
@@ -46,7 +47,7 @@ const CORE_THEMES = [
   { id: 'pokemon', label: 'Покемоны', color: '#ffeb3b', stems: ['покемон', 'pokemon'], categories: [], queries: ['pokemon'] },
 ]
 
-export const THEMES = [...CORE_THEMES, ...EXTRA_THEMES]
+export const THEMES = [...CORE_THEMES, ...EXTRA_THEMES, ...MORE_THEMES]
 
 // «Ванилла+» на случай, когда в описании нет понятных тем
 export const VANILLA_PLUS = { id: 'vanilla', label: 'Ванилла+', color: '#7ee081', stems: [], categories: [], queries: ['vanilla', 'quality of life', 'structures'], pinned: ['terralith', 'yungs-better-dungeons', 'supplementaries', 'waystones'] }

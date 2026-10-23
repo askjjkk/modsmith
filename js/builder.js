@@ -85,10 +85,21 @@ export function matchesTheme(theme, p) {
   return titleMatches(theme, p) || specific.some(c => (p.categories || []).includes(c))
 }
 
+// слово темы (из её английских запросов) встречается в описании мода целым словом
+export function mentions(theme, p) {
+  const text = ` ${(p.description || '').toLowerCase()} `
+  return theme.queries.flatMap(q => q.toLowerCase().split(' ')).filter(w => w.length > 3)
+    .some(w => new RegExp(`[^a-z]${w.replace(/s$/, '')}s?[^a-z]`).test(text))
+}
+
 export function titleMatches(theme, p) {
+  const title = ` ${p.title.toLowerCase()} `
   const words = theme.queries.flatMap(q => q.toLowerCase().split(' '))
     .concat(theme.stems.filter(s => /^[a-z=]/.test(s)).map(s => s.replace('=', '')))
-  return words.some(w => w.length > 2 && p.title.toLowerCase().includes(w))
+  // короткие слова — только целиком («mana» не должно совпасть с «Management», «tram» — с «Trample»)
+  return words.some(w => w.length > 2 && (w.length > 5
+    ? title.includes(w)
+    : new RegExp(`[^a-z]${w.replace(/s$/, '')}s?[^a-z]`).test(title)))
 }
 
 const incompatibleIds = version => (version.dependencies || [])
@@ -215,6 +226,17 @@ export class PackBuilder {
       // у темы нет категории на Modrinth: берём только моды со словом темы в названии
       const strict = pool.filter(p => pinned.has(p.id) || titleMatches(theme, p))
       if (strict.length >= 3) pool = strict
+    }
+    if (pool.length < 3) {
+      // узкая тема («вертолёты», «суши»): ищем мягче — без категории и с меньшим порогом скачиваний,
+      // но только моды, где слово темы есть в названии или описании
+      const wider = await Promise.all(theme.queries.map(q => this.api.search(q, { ...opts, limit: 40 })))
+      for (const p of wider.flat()) {
+        if (!p || seen.has(p.id) || isLibrary(p) || p.downloads < 2000) continue
+        if (!titleMatches(theme, p) && !mentions(theme, p)) continue
+        seen.set(p.id, p)
+        pool.push(p)
+      }
     }
     return pool.sort((a, b) => score(b) - score(a))
   }
@@ -378,7 +400,8 @@ export async function buildPack(opts, api, emit = () => {}) {
     }
   }
 
-  const themes = opts.themes.length ? opts.themes : [{ theme: VANILLA_PLUS, word: null }]
+  // «только оптимизация»: тематические моды не нужны вовсе
+  const themes = opts.onlyBase ? [] : opts.themes.length ? opts.themes : [{ theme: VANILLA_PLUS, word: null }]
   const budget = SIZES[opts.size] || SIZES.normal
   const quota = Math.max(2, Math.ceil(budget / themes.length))
   progress(0.25, 'Ищу моды по темам…')
@@ -421,5 +444,7 @@ export async function buildPack(opts, api, emit = () => {}) {
   progress(0.96, 'Проверяю загрузчик…')
   const loaderVersion = await api.loaderVersion(opts.loader, opts.version)
   progress(1, 'Готово')
-  return { mods: b.mods(), skipped: b.skipped, loaderVersion, version: opts.version, loader: opts.loader }
+  // темы, по которым в итоге не осталось ни одного мода: честно скажем об этом
+  const emptyThemes = themes.filter(t => t.theme !== VANILLA_PLUS && !b.mods().some(m => m.section.id === t.theme.id)).map(t => t.theme.label)
+  return { mods: b.mods(), skipped: b.skipped, emptyThemes, loaderVersion, version: opts.version, loader: opts.loader }
 }

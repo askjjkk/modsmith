@@ -27,9 +27,11 @@ export function buildIndex({ name, summary, version, loader, loaderVersion, mods
   }
 }
 
-export async function mrpackBlob(index, JSZip) {
+// options: текст options.txt игрока (или null). В .mrpack он лежит в overrides/ — лаунчер сам положит его в профиль.
+export async function mrpackBlob(index, JSZip, options = null) {
   const zip = new JSZip()
   zip.file('modrinth.index.json', JSON.stringify(index, null, 2))
+  if (options) zip.file('overrides/options.txt', options)
   return zip.generateAsync({ type: 'blob', mimeType: 'application/x-modrinth-modpack+zip' })
 }
 
@@ -55,9 +57,10 @@ export function readme({ name, version, loader, loaderVersion, mods }) {
 }
 
 // Скачивает .jar (по 4 одновременно) и складывает в zip. onProgress(доля 0..1)
-export async function modsZipBlob(pack, JSZip, onProgress = () => {}, fetchImpl = (...a) => fetch(...a)) {
+export async function modsZipBlob(pack, JSZip, onProgress = () => {}, fetchImpl = (...a) => fetch(...a), options = null) {
   const zip = new JSZip()
-  zip.file('КАК-УСТАНОВИТЬ.txt', readme(pack))
+  zip.file('КАК-УСТАНОВИТЬ.txt', readme(pack) + (options ? '\r\n\r\nВаши настройки игры: положите options.txt в папку .minecraft (с заменой).' : ''))
+  if (options) zip.file('options.txt', options)
   const total = pack.mods.reduce((s, m) => s + m.file.size, 0)
   let done = 0
   const queue = [...pack.mods]
