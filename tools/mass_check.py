@@ -88,17 +88,23 @@ def prepare_server(work_root: Path, mc: str, deps: dict, cache: dict) -> tuple:
         ver = deps["neoforge"] if neo else f"{mc}-{deps['forge']}"
         key = ("neo" if neo else "forge", ver)
         home = work_root / f"{'neoforge' if neo else 'forge'}-{ver}"
+        lib = f"libraries/net/neoforged/neoforge/{ver}" if neo else f"libraries/net/minecraftforge/forge/{ver}"
         if key not in cache:
-            if not (home / "libraries").exists():
+            # установка иногда срывается на скачивании — повторяем, пока не появится файл запуска
+            for _ in range(3):
+                if (home / lib / "win_args.txt").exists():
+                    break
                 home.mkdir(parents=True, exist_ok=True)
                 url = (f"https://maven.neoforged.net/releases/net/neoforged/neoforge/{ver}/neoforge-{ver}-installer.jar" if neo
                        else f"https://maven.minecraftforge.net/net/minecraftforge/forge/{ver}/forge-{ver}-installer.jar")
                 installer = home / "installer.jar"
-                installer.write_bytes(fetch(url))
+                if not installer.exists():
+                    installer.write_bytes(fetch(url))
                 subprocess.run(["java", "-jar", str(installer), "--installServer", str(home)], cwd=home,
                                capture_output=True, timeout=900)
+            if not (home / lib / "win_args.txt").exists():
+                raise RuntimeError(f"сервер {ver} не установился")
             cache[key] = home
-        lib = f"libraries/net/neoforged/neoforge/{ver}" if neo else f"libraries/net/minecraftforge/forge/{ver}"
         return home, [f"@{lib}/win_args.txt", "nogui"]
     raise ValueError("неизвестный загрузчик")
 

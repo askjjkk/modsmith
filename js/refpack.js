@@ -14,7 +14,7 @@ export const CHUNK_EXTRAS = {
   fabric: ['c2me-fabric', 'noisium', 'scalablelux', 'badoptimizations', 'packet-fixer', 'particle-core'],
   quilt: ['c2me-fabric', 'noisium', 'scalablelux', 'badoptimizations', 'packet-fixer', 'particle-core'],
   forge: ['c2mef', 'radium', 'saturn', 'badoptimizations', 'packet-fixer', 'particle-core'],
-  neoforge: ['radium', 'packet-fixer', 'particle-core'],
+  neoforge: ['packet-fixer', 'particle-core'],
 }
 
 // Конфиги, которые не нужны или вредны в чужой сборке

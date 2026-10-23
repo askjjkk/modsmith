@@ -51,6 +51,8 @@ test('группы по slug и названию', () => {
   eq(groupOf({ slug: 'sodium', title: 'Sodium' }), 'render')
   eq(groupOf({ slug: 'some-map', title: 'VoxelMap Updated' }), 'minimap')
   eq(groupOf({ slug: 'create', title: 'Create' }), null)
+  // Lithium и Radium вместе роняют NeoForge на старте
+  eq(groupOf({ slug: 'radium', title: 'Radium Reforged' }), groupOf({ slug: 'lithium', title: 'Lithium' }))
 })
 
 // --- подбор на подставных данных ---
