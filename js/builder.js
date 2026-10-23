@@ -1,6 +1,6 @@
 // Подбор модов: база + темы, версии под (minecraft, загрузчик), зависимости, конфликты.
 import { BASE, GROUPS, SIZES, VANILLA_PLUS } from './themes.js'
-import { KNOWN_SLUGS, isPlatform, readJarMeta } from './jarmeta.js'
+import { KNOWN_SLUGS, isPlatform, norm, readJarMeta } from './jarmeta.js'
 
 export const loaderList = loader => (loader === 'quilt' ? ['quilt', 'fabric'] : [loader])
 
@@ -79,6 +79,12 @@ export function themeScore(theme, p) {
   return Math.log10((p.downloads || 0) + 1) + (cat ? 1 : 0) + (inTitle ? 1.5 : inText ? 0.7 : -1)
 }
 
+// Мод «про» эту тему: её слово в названии или её особая категория (для «без магии»)
+export function matchesTheme(theme, p) {
+  const specific = (theme.categories || []).filter(c => !['adventure', 'game-mechanics', 'utility', 'decoration', 'worldgen', 'equipment', 'mobs'].includes(c))
+  return titleMatches(theme, p) || specific.some(c => (p.categories || []).includes(c))
+}
+
 export function titleMatches(theme, p) {
   const words = theme.queries.flatMap(q => q.toLowerCase().split(' '))
     .concat(theme.stems.filter(s => /^[a-z=]/.test(s)).map(s => s.replace('=', '')))
@@ -89,7 +95,9 @@ const incompatibleIds = version => (version.dependencies || [])
   .filter(d => d.dependency_type === 'incompatible' && d.project_id).map(d => d.project_id)
 
 export class PackBuilder {
-  constructor(api, { version, loader }, { readMeta = readJarMeta } = {}) {
+  constructor(api, { version, loader, excluded = [], blocked = {} }, { readMeta = readJarMeta } = {}) {
+    this.excluded = excluded
+    this.blocked = blocked
     this.api = api
     this.version = version
     this.loader = loader
@@ -143,6 +151,15 @@ export class PackBuilder {
     if (!allowLibrary && isLibrary(project)) return false
     const g = groupOf(project)
     if (g && this.groups.has(g)) return false
+    if (this.blocked[project.slug]) {
+      this.skipped.push({ title: project.title, why: this.blocked[project.slug] })
+      return false
+    }
+    const unwanted = !allowLibrary && this.excluded.find(t => matchesTheme(t, project))
+    if (unwanted) {
+      this.skipped.push({ title: project.title, why: `вы просили без темы «${unwanted.label}»` })
+      return false
+    }
     const base = !allowLibrary && missingBase(project, this.chosen)
     if (base) {
       this.skipped.push({ title: project.title, why: `дополнение к ${base}, а его нет в сборке` })
@@ -395,6 +412,12 @@ export async function buildPack(opts, api, emit = () => {}) {
 
   progress(0.9, 'Заглядываю внутрь модов: что им нужно на самом деле…')
   await b.verifyJars()
+  // внутренние id и зависимости модов: по ним «Доктор» найдёт мод в crash-report
+  for (const m of b.mods()) {
+    const meta = await b.metaOf(m).catch(() => null)
+    m.ids = [...new Set([...(meta?.ids || []), norm(m.project.slug)])]
+    m.depends = meta?.depends || []
+  }
   progress(0.96, 'Проверяю загрузчик…')
   const loaderVersion = await api.loaderVersion(opts.loader, opts.version)
   progress(1, 'Готово')

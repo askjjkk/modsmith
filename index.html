@@ -96,9 +96,16 @@
     </div>
     <div id="sections"></div>
     <details class="skipped glass" id="skipped" hidden>
-      <summary>Не подошли под эту версию</summary>
+      <summary>Что я отсеял и почему</summary>
       <ul id="skipped-list"></ul>
     </details>
+    <section class="doctor glass" aria-labelledby="doctor-title">
+      <h2 id="doctor-title">Игра не запустилась?</h2>
+      <p>Вставьте сюда crash-report (папка <code>crash-reports</code> в профиле сборки) или текст ошибки из окна лаунчера. Я найду, какие моды виноваты, уберу их, запомню и отдам исправленную сборку.</p>
+      <textarea id="crash" rows="5" spellcheck="false" placeholder="---- Minecraft Crash Report ----&#10;…"></textarea>
+      <button class="btn" id="diagnose" type="button"><span class="btn-text">Найти виновника</span></button>
+      <div class="diag-result" id="diag-result" aria-live="polite"></div>
+    </section>
   </section>
 </main>
 
@@ -107,6 +114,7 @@
   <p><a href="https://github.com/askjjkk/modsmith" target="_blank" rel="noopener">Исходный код</a></p>
 </footer>
 
+<datalist id="theme-list"></datalist>
 <div class="toast" id="toast" role="status"></div>
 </body>
 </html>

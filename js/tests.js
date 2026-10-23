@@ -1,5 +1,8 @@
 // Мини-набор тестов: открыть tests.html через локальный сервер
-import { parse, detectThemes, detectVersion, detectLoader } from './parser.js'
+import { THEME_BY_ID, analyze, parse, detectThemes, detectVersion, detectLoader } from './parser.js'
+import { REFERENCES } from './references.js'
+import { THEMES } from './themes.js'
+import { diagnose, findCulprits } from './doctor.js'
 import { PackBuilder, buildPack, groupOf, majorMinor, missingBase, pickVersion } from './builder.js'
 import { buildIndex } from './mrpack.js'
 import { isPlatform, nestedIds, parseFabric, parseToml } from './jarmeta.js'
@@ -19,10 +22,10 @@ test('английское описание', () => {
   eq(ids(detectThemes('tech pack with machines and space rockets')), ['tech', 'space'])
 })
 test('seasons не считается морем', () => {
-  eq(ids(detectThemes('seasons and weather')), ['seasons'])
+  eq(ids(detectThemes('seasons and weather')).includes('ocean'), false)
 })
 test('ё и регистр', () => {
-  eq(ids(detectThemes('ЕДА и мебель, всё уютное')), ['decor', 'food'])
+  eq(ids(detectThemes('ЕДА и мебель, всё уютное')).filter(i => ['decor', 'food'].includes(i)), ['decor', 'food'])
 })
 test('версия и загрузчик из текста', () => {
   eq(detectVersion('сборка на 1.20.1 forge'), '1.20.1')
@@ -224,6 +227,70 @@ test('мод, отставший от своей библиотеки, убир�
   await b.verifyJars()
   eq(b.mods().map(m => m.project.id).sort(), ['se', 'wiz'])
   eq(b.skipped.find(s => s.title === 'RPG Minibosses').why.includes('1.8'), true)
+})
+
+// --- понимание запроса v2 ---
+test('отрицание: «но без хоррора»', () => {
+  const a = analyze('магия и драконы, но без хоррора')
+  eq(a.themes.map(t => t.theme.id).filter(id => ['magic', 'dragons'].includes(id)).sort(), ['dragons', 'magic'])
+  eq(a.excluded.map(t => t.id).includes('horror'), true)
+  eq(a.themes.some(t => t.theme.id === 'horror'), false)
+})
+test('отрицание списком и «не хочу»', () => {
+  eq(analyze('без магии и драконов').excluded.map(t => t.id).sort().filter(i => ['magic', 'dragons'].includes(i)), ['dragons', 'magic'])
+  eq(analyze('хочу технологии, не хочу зомби').excluded.map(t => t.id).includes('zombies'), true)
+  eq(analyze('хочу технологии, не хочу зомби').themes.some(t => t.theme.id === 'tech'), true)
+  eq(analyze('no magic, just tech').excluded.map(t => t.id).includes('magic'), true)
+})
+test('отсылка «как в Скайриме»', () => {
+  const a = analyze('хочу как в скайриме')
+  eq(a.references.map(r => r.label), ['Skyrim'])
+  for (const id of ['fantasy', 'dragons', 'rpg']) eq(a.themes.some(t => t.theme.id === id), true, id)
+})
+test('нет ложных срабатываний', () => {
+  const ids = text => analyze(text).themes.map(t => t.theme.id)
+  eq(ids('сборка про космос').includes('weapons'), false, 'космос ≠ коса')
+  eq(ids('классная сборка').includes('classes'), false, 'классная ≠ классы')
+  eq(ids('деревня у реки').includes('forest'), false, 'деревня ≠ деревья')
+  eq(ids('по адресу').includes('nether'), false, 'адрес ≠ ад')
+})
+test('все отсылки ведут на существующие темы, id тем уникальны', () => {
+  const missing = REFERENCES.flatMap(([, , ids]) => ids).filter(id => !THEME_BY_ID.has(id))
+  eq(missing, [])
+  eq(new Set(THEMES.map(t => t.id)).size, THEMES.length)
+  eq(THEMES.length >= 120, true, `тем всего ${THEMES.length}`)
+})
+
+// --- доктор ---
+test('доктор находит оба виновника из настоящего crash-report', () => {
+  const crash = `java.lang.RuntimeException: Could not execute entrypoint stage 'main' due to errors, provided by 'cobbleboss' at 'com.cobbleboss.CobbleBoss'!
+	at net.fabricmc.loader.impl.FabricLoaderImpl.lambda$invokeEntrypoints$0(FabricLoaderImpl.java:413)
+	Suppressed: java.lang.NoClassDefFoundError: net/spell_engine/api/config/ConfigFile$Equipment
+		at knot//com.cleannrooster.rpg_minibosses.config.Default.<clinit>(Default.java:16)
+		at knot//com.cleannrooster.rpg_minibosses.RPGMinibosses.<clinit>(RPGMinibosses.java:107)
+Caused by: java.lang.NoClassDefFoundError: com/cobblemon/mod/common/battles/dispatch/InterpreterInstruction
+	at java.base/java.lang.Class.forName0(Native Method)`
+  const mods = [
+    { project: { id: 'a', title: 'CobbleBoss', slug: 'cobbleboss' }, ids: ['cobbleboss'], depends: [] },
+    { project: { id: 'b', title: 'ANARCHY RPG', slug: 'anarchy-rpg' }, ids: ['rpg_minibosses'], depends: ['spell_engine'] },
+    { project: { id: 'c', title: 'Spell Engine', slug: 'spell-engine' }, ids: ['spell_engine'], depends: [] },
+    { project: { id: 'd', title: 'Addon', slug: 'addon' }, ids: ['addon'], depends: ['rpg_minibosses'] },
+  ]
+  const d = diagnose(crash, mods)
+  eq(d.culprits.map(c => c.mod.project.id).sort(), ['a', 'b'])
+  eq(d.dependents.map(c => c.mod.project.id), ['d'])
+})
+test('доктор понимает окно «Incompatible mods found»', () => {
+  const text = "Mod 'Wizards (RPG Series)' (wizards) 3.1.3+1.21.1 requires any version of structure_pool_api, which is missing!"
+  eq(findCulprits(text).map(c => c.id), ['wizards'])
+})
+
+test('чёрный список и «без темы» в подборе', async () => {
+  const api = fakeApi({ projects: {}, versions: { m1: V('m1'), bad: V('bad') }, search: {} })
+  const b = new PackBuilder(api, { version: '1.21.1', loader: 'fabric', excluded: [THEME_BY_ID.get('magic')], blocked: { bad: 'сломан' } })
+  eq(await b.tryAdd(P('bad'), { id: 't' }, ''), false)
+  eq(await b.tryAdd(P('m1', { title: 'Magic Wands', categories: ['magic'] }), { id: 't' }, ''), false)
+  eq(b.skipped.map(s => s.why), ['сломан', 'вы просили без темы «Магия»'])
 })
 
 // --- запуск ---

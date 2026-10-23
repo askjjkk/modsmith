@@ -149,6 +149,33 @@ main { width: min(1100px, 100% - 32px); margin: 0 auto; }
   animation: pop .5s var(--spring) both;
 }
 .chip i { width: 12px; height: 12px; background: var(--c); box-shadow: 0 0 10px var(--c); }
+button.chip { color: var(--text); cursor: pointer; transition: transform .25s var(--spring), filter .2s; }
+button.chip:hover { transform: translateY(-2px); filter: brightness(1.15); }
+.chip.no { text-decoration: line-through; text-decoration-color: rgba(255, 90, 79, .8); color: #ffb3ad; }
+.chip-add input {
+  width: 170px; padding: 5px 10px;
+  font: 600 14px var(--body); color: var(--text);
+  background: rgba(5, 8, 18, .45); border: 1px dashed rgba(255, 255, 255, .25); border-radius: 10px;
+  outline: none; transition: border-color .25s, width .35s var(--smooth);
+}
+.chip-add input:focus { border-color: var(--amethyst); width: 230px; }
+.refs { flex-basis: 100%; margin: 4px 0 0; font-size: 14px; color: var(--diamond); animation: rise .4s var(--smooth) both; }
+
+.doctor { margin-top: 30px; padding: 24px; }
+.doctor h2 { margin: 0 0 6px; font: 700 22px var(--body); }
+.doctor p { margin: 0 0 14px; color: var(--muted); max-width: 760px; }
+.doctor code { color: var(--gold); }
+#crash {
+  width: 100%; resize: vertical; padding: 14px 16px; margin-bottom: 12px;
+  font: 13px/1.5 ui-monospace, Consolas, monospace; color: var(--text);
+  background: rgba(5, 8, 18, .55); border: 1px solid rgba(255, 255, 255, .1); border-radius: 14px; outline: none;
+}
+#crash:focus { border-color: rgba(255, 90, 79, .6); box-shadow: 0 0 0 4px rgba(255, 90, 79, .12); }
+.diag-result { margin-top: 16px; }
+.diag-result p { color: var(--text); margin-bottom: 8px; }
+.diag-result ul { margin: 0 0 16px; padding-left: 20px; color: var(--muted); }
+.diag-result li { margin: 4px 0; animation: rise .4s var(--smooth) both; }
+.diag-result b { color: #ffb3ad; }
 .chip.out { animation: unpop .25s ease-in both; }
 .chip-hint { font-size: 14px; color: var(--muted); align-self: center; animation: rise .4s var(--smooth) both; }
 @keyframes pop { from { opacity: 0; transform: scale(.4) translateY(8px); } }

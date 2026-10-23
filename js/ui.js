@@ -1,6 +1,9 @@
 // Интерфейс: живой разбор описания, верстак с анимацией сборки, карточки модов, скачивание
 import { ApiError, createApi } from './modrinth.js'
-import { parse } from './parser.js'
+import { THEME_BY_ID, parse } from './parser.js'
+import { THEMES } from './themes.js'
+import { addBlocked, allBlocked } from './broken.js'
+import { diagnose } from './doctor.js'
 import { buildPack } from './builder.js'
 import { LOADER_NAMES, buildIndex, modsZipBlob, mrpackBlob } from './mrpack.js'
 import { startSky } from './bg.js'
@@ -135,34 +138,93 @@ function setVersion(v, flash) {
   if (flash) { sel.classList.remove('flash'); void sel.offsetWidth; sel.classList.add('flash') }
 }
 
-// ---------- живой разбор ----------
+// ---------- живой разбор и «Понял так» ----------
+// manual: темы, которые человек поправил кликом: id -> 'in' (хочу) | 'out' (не хочу) | 'off' (убрать)
+const manual = new Map()
+let lastParse = { themes: [], excluded: [], references: [] }
+
+function effective() {
+  const inc = new Map(lastParse.themes.map(t => [t.theme.id, t]))
+  const exc = new Map(lastParse.excluded.map(t => [t.id, t]))
+  for (const [id, mode] of manual) {
+    const theme = THEME_BY_ID.get(id)
+    if (!theme) continue
+    inc.delete(id)
+    exc.delete(id)
+    if (mode === 'in') inc.set(id, { theme, word: theme.label, via: 'вручную' })
+    if (mode === 'out') exc.set(id, theme)
+  }
+  return { themes: [...inc.values()], excluded: [...exc.values()] }
+}
+
 const chipEls = new Map()
-function renderChips(found, hasText) {
+function chip(key, theme, negative) {
+  const el = document.createElement('button')
+  el.type = 'button'
+  el.className = negative ? 'chip no' : 'chip'
+  el.style.setProperty('--c', negative ? '#ff5a4f' : theme.color)
+  el.title = negative ? 'Не будет в сборке. Нажмите, чтобы убрать запрет' : 'Нажмите: «не хочу эту тему»'
+  el.append(document.createElement('i'), negative ? `без: ${theme.label}` : theme.label)
+  el.addEventListener('click', () => {
+    manual.set(theme.id, negative ? 'off' : 'out')
+    renderChips()
+  })
+  return el
+}
+
+function renderChips() {
   const box = $('.chips')
-  const ids = new Set(found.map(f => f.theme.id))
-  for (const [id, el] of chipEls) {
-    if (!ids.has(id)) {
-      chipEls.delete(id)
+  const text = $('#prompt').value.trim()
+  const { themes, excluded } = effective()
+  const wanted = new Map([
+    ...themes.map(t => [`${t.theme.id}:in`, [t.theme, false]]),
+    ...excluded.map(t => [`${t.id}:out`, [t, true]]),
+  ])
+  for (const [key, el] of chipEls) {
+    if (!wanted.has(key)) {
+      chipEls.delete(key)
       el.classList.add('out')
       setTimeout(() => el.remove(), 260)
     }
   }
-  box.querySelector('.chip-hint')?.remove()
-  for (const { theme } of found) {
-    if (chipEls.has(theme.id)) continue
-    const el = document.createElement('span')
-    el.className = 'chip'
-    el.style.setProperty('--c', theme.color)
-    el.append(document.createElement('i'), theme.label)
+  box.querySelectorAll('.chip-hint, .chip-add, .refs').forEach(e => e.remove())
+  for (const [key, [theme, negative]] of wanted) {
+    if (chipEls.has(key)) continue
+    const el = chip(key, theme, negative)
     box.append(el)
-    chipEls.set(theme.id, el)
+    chipEls.set(key, el)
   }
-  if (hasText && !found.length) {
+  if (text.length > 2 && !themes.length) {
     const hint = document.createElement('span')
     hint.className = 'chip-hint'
     hint.textContent = 'Темы пока не узнал. Соберу «ваниллу+»: оптимизация, удобства, структуры.'
     box.append(hint)
   }
+  if (text.length > 2) box.append(addThemeControl())
+  const refs = lastParse.references.filter(r => !r.negative)
+  if (refs.length) {
+    const r = document.createElement('p')
+    r.className = 'refs'
+    r.textContent = `Узнал отсылку: ${refs.map(x => x.label).join(', ')}. Темы взял оттуда, лишнее можно снять кликом.`
+    box.append(r)
+  }
+}
+
+// «+ тема»: выбрать любую из 120+ тем вручную
+function addThemeControl() {
+  const wrap = document.createElement('span')
+  wrap.className = 'chip-add'
+  const input = document.createElement('input')
+  input.setAttribute('list', 'theme-list')
+  input.placeholder = '+ добавить тему'
+  input.setAttribute('aria-label', 'Добавить тему')
+  input.addEventListener('change', () => {
+    const theme = THEMES.find(t => t.label.toLowerCase() === input.value.trim().toLowerCase())
+    if (theme) { manual.set(theme.id, 'in'); renderChips() }
+    input.value = ''
+  })
+  wrap.append(input)
+  return wrap
 }
 
 let parseTimer
@@ -171,7 +233,8 @@ function onInput() {
   parseTimer = setTimeout(() => {
     const text = $('#prompt').value
     const p = parse(text)
-    renderChips(p.themes, text.trim().length > 2)
+    lastParse = p
+    renderChips()
     if (p.version) setVersion(p.version, true)
     if (p.loader && p.loader !== state.loader) setSeg('loader', p.loader, true)
     if (p.size && p.size !== state.size) setSeg('size', p.size, true)
@@ -240,10 +303,11 @@ async function craft() {
     }
   }
 
-  const p = parse(text)
+  lastParse = parse(text)
+  const { themes, excluded } = effective()
   const opts = {
     version: $('#version').value, loader: state.loader, size: state.size,
-    perf: $('#perf').checked, qol: $('#qol').checked, themes: p.themes,
+    perf: $('#perf').checked, qol: $('#qol').checked, themes, excluded, blocked: allBlocked(),
   }
   try {
     const pack = await buildPack(opts, api, emit)
@@ -320,6 +384,7 @@ function renderStats() {
 function card(mod, index) {
   const el = document.createElement('article')
   el.className = 'card'
+  el.dataset.id = mod.project.id
   el.style.setProperty('--c', mod.section.color)
   el.style.transitionDelay = `${Math.min(index * 45, 500)}ms`
   const img = document.createElement('img')
@@ -470,6 +535,53 @@ async function downloadZip() {
   }
 }
 
+// ---------- «Доктор сборки» ----------
+let diagnosis = null
+function runDoctor() {
+  const box = $('#diag-result')
+  box.textContent = ''
+  const text = $('#crash').value
+  if (!state.pack) { toast('Сначала соберите сборку (или откройте ссылку на неё), потом вставьте crash-report.'); return }
+  if (text.trim().length < 40) { toast('Вставьте текст crash-report целиком: файл из папки crash-reports или logs/latest.log.'); return }
+  const mods = state.pack.mods.filter(m => state.enabled.has(m.project.id))
+  diagnosis = diagnose(text, mods)
+  const all = [...diagnosis.culprits, ...diagnosis.dependents]
+  const p = document.createElement('p')
+  if (!all.length) {
+    p.textContent = 'В этой сборке виновника не нашёл. Проверьте, что вставили отчёт именно от этой сборки, или пришлите logs/latest.log: там подробнее.'
+    box.append(p)
+    return
+  }
+  p.textContent = diagnosis.culprits.length === 1 ? 'Нашёл виновника:' : `Нашёл виновников: ${diagnosis.culprits.length}`
+  const ul = document.createElement('ul')
+  for (const { mod, why } of all) {
+    const li = document.createElement('li')
+    const b = document.createElement('b')
+    b.textContent = mod.project.title
+    li.append(b, `: ${why}`)
+    ul.append(li)
+  }
+  const fix = document.createElement('button')
+  fix.type = 'button'
+  fix.className = 'btn btn-primary'
+  fix.textContent = 'Убрать их и скачать исправленную сборку'
+  fix.addEventListener('click', applyDoctor)
+  box.append(p, ul, fix)
+}
+
+async function applyDoctor() {
+  if (!diagnosis) return
+  for (const { mod, why } of [...diagnosis.culprits, ...diagnosis.dependents]) {
+    state.enabled.delete(mod.project.id)
+    const card = document.querySelector(`.card[data-id="${mod.project.id}"]`)
+    if (card) { card.classList.add('off'); card.querySelector('.toggle').checked = false }
+    if (diagnosis.culprits.some(c => c.mod === mod)) addBlocked(mod.project.slug, `падал в игре: ${why}`)
+  }
+  renderStats()
+  await downloadMrpack()
+  toast('Убрал и запомнил: в следующих сборках этих модов не будет. Удалите старый профиль в лаунчере и откройте новый файл.')
+}
+
 function shareParams(opts, text) {
   return new URLSearchParams({ q: text, v: opts.version, l: opts.loader, s: opts.size, p: opts.perf ? '1' : '0', u: opts.qol ? '1' : '0' }).toString()
 }
@@ -511,6 +623,9 @@ async function main() {
   $('#prompt').addEventListener('input', onInput)
   $('#prompt').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) craft() })
   $('#craft').addEventListener('click', craft)
+  $('#diagnose').addEventListener('click', runDoctor)
+  const list = $('#theme-list')
+  for (const t of [...THEMES].sort((a, b) => a.label.localeCompare(b.label, 'ru'))) list.append(new Option(t.label))
   $('#dl-mrpack').addEventListener('click', downloadMrpack)
   $('#dl-zip').addEventListener('click', downloadZip)
   $('#share').addEventListener('click', share)

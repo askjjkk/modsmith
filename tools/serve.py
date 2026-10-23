@@ -16,13 +16,14 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
     def do_POST(self):
-        m = re.fullmatch(r"/save/([\w.-]+\.json)", self.path)
+        m = re.fullmatch(r"/save/((?:packs/)?[\w.-]+\.json)", self.path)
         if not m:
             self.send_error(404)
             return
-        OUT.mkdir(parents=True, exist_ok=True)
+        target = OUT / m.group(1)
+        target.parent.mkdir(parents=True, exist_ok=True)
         body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
-        (OUT / m.group(1)).write_bytes(body)
+        target.write_bytes(body)
         self.send_response(204)
         self.end_headers()
 

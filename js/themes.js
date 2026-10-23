@@ -1,7 +1,9 @@
 // Словарь тем: основы слов (RU/EN) -> категории и поисковые запросы Modrinth.
 // pinned: известные хорошие моды темы, проверяются первыми (если есть под версию).
 
-export const THEMES = [
+import { EXTRA_THEMES } from './themes-extra.js'
+
+const CORE_THEMES = [
   { id: 'magic', label: 'Магия', color: '#b77bff', stems: ['маги', 'волшеб', 'заклин', 'чар', 'колдов', 'ведьм', 'magic', 'spell', 'wizard', 'sorcer', 'witch'], categories: ['magic'], queries: ['magic', 'spells'], pinned: ['irons-spells-n-spellbooks', 'ars-nouveau', 'botania'] },
   { id: 'tech', label: 'Технологии', color: '#ffb547', stems: ['технолог', 'техник', 'техно', 'механизм', 'завод', 'индустр', 'tech', 'industr', 'machine', 'factory'], categories: ['technology'], queries: ['technology', 'machines'], pinned: ['create'] },
   { id: 'automation', label: 'Автоматизация', color: '#ffa04d', stems: ['автоматиз', 'конвейер', 'automat', 'conveyor'], categories: ['technology'], queries: ['automation', 'create addon'], pinned: ['create'] },
@@ -43,6 +45,8 @@ export const THEMES = [
   { id: 'mining', label: 'Добыча', color: '#90caf9', stems: ['шахт', 'добыч', 'руд', 'копат', 'mining', '=ore', 'ores'], categories: [], queries: ['mining', 'ores'] },
   { id: 'pokemon', label: 'Покемоны', color: '#ffeb3b', stems: ['покемон', 'pokemon'], categories: [], queries: ['pokemon'] },
 ]
+
+export const THEMES = [...CORE_THEMES, ...EXTRA_THEMES]
 
 // «Ванилла+» на случай, когда в описании нет понятных тем
 export const VANILLA_PLUS = { id: 'vanilla', label: 'Ванилла+', color: '#7ee081', stems: [], categories: [], queries: ['vanilla', 'quality of life', 'structures'], pinned: ['terralith', 'yungs-better-dungeons', 'supplementaries', 'waystones'] }

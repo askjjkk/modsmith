@@ -1,0 +1,23 @@
+// Моды, которые падали при настоящем запуске (tools/server_check.py или crash-report игрока).
+// Ключ — slug на Modrinth, значение — почему. Пополняется после проверок запуском.
+export const BROKEN = {
+  'anarchy-rpg': 'падает на старте со Spell Engine 1.10 (проверено запуском)',
+  cobbleboss: 'падает без Cobblemon (проверено запуском)',
+}
+
+const KEY = 'modsmith-blocked'
+
+// Личный список: что «Доктор сборки» нашёл по crash-report этого игрока
+export function loadBlocked() {
+  try { return JSON.parse(localStorage.getItem(KEY) || '{}') } catch { return {} }
+}
+
+export function addBlocked(slug, why) {
+  const list = loadBlocked()
+  list[slug] = why
+  try { localStorage.setItem(KEY, JSON.stringify(list)) } catch { /* приватный режим: просто не запомним */ }
+}
+
+export function allBlocked() {
+  return { ...BROKEN, ...loadBlocked() }
+}
