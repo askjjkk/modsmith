@@ -27,6 +27,15 @@
 
 Проверено на пяти сборках (Forge 1.20.1, NeoForge 1.21.1, Fabric 26.3 и 1.21.1, Quilt 1.20.1): у каждого мода на месте все зависимости и по данным Modrinth, и по метаданным внутри .jar, конфликтов нет, все файлы скачиваются, и контрольные суммы SHA-1 совпадают с .mrpack.
 
+## Оптимизация как в лучших сборках
+
+Базу оптимизации сайт не выдумывает, а берёт из свежей версии проверенных сборок под выбранную версию игры:
+
+- **Fabric / Quilt** — состав и конфиги [Fabulously Optimized](https://modrinth.com/modpack/fabulously-optimized) (BSD-3-Clause, © Fabulously Optimized contributors) плюс моды для быстрой прогрузки чанков: C2ME, Noisium, ScalableLux, BadOptimizations;
+- **Forge / NeoForge** — состав и конфиги [Keo Optimized](https://modrinth.com/modpack/keo-optimized) (CC0), в ней уже есть Noisium, C2ME, ScalableLux, Chunky и ServerCore.
+
+Конфиги этих сборок кладутся в `overrides/config/` вместе с файлом `config/modsmith-credits.txt`. Если эталона под версию нет, используется свой проверенный список.
+
 ## Комфортные настройки
 
 Переключатель «Комфортные настройки игры (на любителя)» кладёт в сборку готовый `options.txt` (дальность прорисовки 32, FPS до 260, без покачивания камеры, русский язык, подсказки к предметам). В `.mrpack` он лежит в `overrides/`, лаунчер применит его сам.

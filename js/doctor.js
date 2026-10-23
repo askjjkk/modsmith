@@ -11,6 +11,7 @@ export function findCulprits(text) {
   const add = (id, why) => { const n = norm(id); if (n && !isPlatform(n) && !found.has(n)) found.set(n, why) }
 
   for (const m of text.matchAll(/provided by '([^']+)'/g)) add(m[1], 'упал при запуске игры')
+  for (const m of text.matchAll(/Exception while [^(\n]+\(([a-z0-9_-]+)\)/g)) add(m[1], 'упал при запуске игры')
   for (const m of text.matchAll(/Mod '([^']+)' \(([^)]+)\) \S+ requires (?:version \S+ or later of |any version of |version \S+ of )?(\S+?),? which is missing/g)) {
     add(m[2], `ему нужен «${m[3]}», которого нет`)
   }
@@ -41,8 +42,16 @@ export function diagnose(text, mods) {
   for (const line of text.split(/\r?\n/)) {
     if (/^\s*(Caused by:|Suppressed:|[\w.$]+(Exception|Error)\b)/.test(line)) { searching = true; continue }
     if (!searching) continue
-    const frame = line.match(/^\s*at (?:knot\/\/)?([a-zA-Z_][\w.$<>]+)\(/)
+    const frame = line.match(/^\s*at (?:knot\/{1,2})?([a-zA-Z_][\w.$<>]+)\(/)
     if (!frame) continue
+    // в latest.log у строки стека есть имя файла мода: «~[destroying-minecraft-1.0.0.jar:?]»
+    const jar = line.match(/\[([^[\]]+\.jar)/)?.[1]
+    const byFile = jar && mods.find(m => m.file?.filename === jar)
+    if (byFile) {
+      if (!culprits.has(byFile.project.id)) culprits.set(byFile.project.id, { mod: byFile, why: 'его код упал (видно по стеку ошибки)' })
+      searching = false
+      continue
+    }
     const mod = frame[1].split('.').slice(0, -1).map(norm).filter(s => s.length > 2 && !IGNORE_PKG.has(s)).map(s => byId.get(s)).find(Boolean)
     if (mod) {
       if (!culprits.has(mod.project.id)) culprits.set(mod.project.id, { mod, why: 'его код упал (видно по стеку ошибки)' })

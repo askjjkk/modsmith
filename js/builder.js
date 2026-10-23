@@ -1,6 +1,7 @@
 // Подбор модов: база + темы, версии под (minecraft, загрузчик), зависимости, конфликты.
 import { BASE, GROUPS, SIZES, VANILLA_PLUS } from './themes.js'
 import { KNOWN_SLUGS, isPlatform, norm, readJarMeta } from './jarmeta.js'
+import { CHUNK_EXTRAS, loadRefPack } from './refpack.js'
 
 export const loaderList = loader => (loader === 'quilt' ? ['quilt', 'fabric'] : [loader])
 
@@ -157,7 +158,7 @@ export class PackBuilder {
   }
 
   // Пытается добавить мод вместе с зависимостями. true — добавлен.
-  async tryAdd(project, section, reason, { allowLibrary = false } = {}) {
+  async tryAdd(project, section, reason, { allowLibrary = false, quiet = false } = {}) {
     if (this.chosen.has(project.id)) return false
     if (!allowLibrary && isLibrary(project)) return false
     const g = groupOf(project)
@@ -178,7 +179,8 @@ export class PackBuilder {
     }
     const version = await this.versionFor(project.id)
     if (!version) {
-      this.skipped.push({ title: project.title, why: `нет версии под ${this.version} ${this.loader}` })
+      // для «полировки» это обычное дело (мод есть не под все версии) — не засоряем список отсеянного
+      if (!quiet) this.skipped.push({ title: project.title, why: `нет версии под ${this.version} ${this.loader}` })
       return false
     }
     const why = this.conflicts(project, version)
@@ -386,17 +388,27 @@ export async function buildPack(opts, api, emit = () => {}) {
   b.onMod = mod => emit({ type: 'mod', mod })
   const progress = (value, text) => emit({ type: 'progress', value, text })
 
-  for (const key of ['perf', 'qol']) {
+  // база оптимизации — как в проверенной сборке (Fabulously Optimized / Keo Optimized) под эту версию
+  let ref = null
+  if (opts.perf) {
+    progress(0.04, 'Беру оптимизацию из проверенной сборки…')
+    ref = await (opts.loadRef || loadRefPack)(api, opts.loader, opts.version)
+  }
+  for (const key of ['perf', 'qol', 'polish']) {
     if (!opts[key]) continue
     const base = BASE[key]
-    const section = { id: key, label: base.label, color: base.color }
-    progress(key === 'perf' ? 0.06 : 0.16, key === 'perf' ? 'Ставлю оптимизацию…' : 'Добавляю удобства…')
-    const projects = await api.projects(base[opts.loader] || [])
+    const fromRef = key === 'perf' && ref
+    const slugs = fromRef ? [...ref.slugs, ...CHUNK_EXTRAS[opts.loader]] : key === 'perf' ? [...base[opts.loader], ...CHUNK_EXTRAS[opts.loader]] : base[opts.loader] || []
+    const section = { id: key, label: fromRef ? `Оптимизация (как в ${ref.name})` : base.label, color: base.color }
+    progress({ perf: 0.08, qol: 0.14, polish: 0.18 }[key], { perf: 'Ставлю оптимизацию…', qol: 'Добавляю удобства…', polish: 'Добавляю атмосферу: анимации, звуки, частицы…' }[key])
+    const projects = await api.projects(slugs)
     const bySlug = new Map(projects.map(p => [p.slug, p]))
     await Promise.all(projects.map(p => b.versionFor(p.id))) // прогрев кэша параллельно
-    for (const slug of base[opts.loader] || []) {
+    for (const slug of slugs) {
       const p = bySlug.get(slug)
-      if (p) await b.tryAdd(p, section, key === 'perf' ? 'больше FPS' : 'удобство', { allowLibrary: true })
+      const reason = key === 'qol' ? 'удобство' : key === 'polish' ? 'атмосфера' : CHUNK_EXTRAS[opts.loader].includes(slug) ? 'быстрая прогрузка чанков'
+        : fromRef ? `из ${ref.name}` : 'больше FPS'
+      if (p) await b.tryAdd(p, section, reason, { allowLibrary: true, quiet: key === 'polish' })
     }
   }
 
@@ -446,5 +458,6 @@ export async function buildPack(opts, api, emit = () => {}) {
   progress(1, 'Готово')
   // темы, по которым в итоге не осталось ни одного мода: честно скажем об этом
   const emptyThemes = themes.filter(t => t.theme !== VANILLA_PLUS && !b.mods().some(m => m.section.id === t.theme.id)).map(t => t.theme.label)
-  return { mods: b.mods(), skipped: b.skipped, emptyThemes, loaderVersion, version: opts.version, loader: opts.loader }
+  return { mods: b.mods(), skipped: b.skipped, emptyThemes, loaderVersion, version: opts.version, loader: opts.loader,
+    ref: ref && { name: ref.name, license: ref.license, version: ref.version, configs: ref.configs } }
 }

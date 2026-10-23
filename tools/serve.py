@@ -16,7 +16,7 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
     def do_POST(self):
-        m = re.fullmatch(r"/save/((?:packs/)?[\w.-]+\.json)", self.path)
+        m = re.fullmatch(r"/save/((?:[\w-]+/)?[\w.-]+\.json)", self.path)
         if not m:
             self.send_error(404)
             return

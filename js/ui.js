@@ -317,7 +317,7 @@ async function craft() {
   const { themes, excluded } = effective()
   const opts = {
     version: $('#version').value, loader: state.loader, size: state.size,
-    perf: $('#perf').checked, qol: $('#qol').checked, themes, excluded, blocked: allBlocked(),
+    perf: $('#perf').checked, qol: $('#qol').checked, polish: $('#polish').checked, themes, excluded, blocked: allBlocked(),
     onlyBase: !!lastParse.settings?.onlyBase && !manual.size,
   }
   try {
@@ -529,7 +529,7 @@ const comfortOptions = () => ($('#comfort').checked ? COMFORT_OPTIONS : null)
 async function downloadMrpack() {
   const pack = enabledPack()
   const index = buildIndex({ ...pack, summary: `Собрано на Modsmith по описанию: ${pack.text}` })
-  download(await mrpackBlob(index, window.JSZip, comfortOptions()), fileName(pack, 'mrpack'))
+  download(await mrpackBlob(index, window.JSZip, comfortOptions(), pack.ref), fileName(pack, 'mrpack'))
   toast('Готово! Открой файл двойным кликом в Modrinth App или перетащи в Prism Launcher.')
 }
 
@@ -602,7 +602,7 @@ async function applyDoctor() {
 }
 
 function shareParams(opts, text) {
-  return new URLSearchParams({ q: text, v: opts.version, l: opts.loader, s: opts.size, p: opts.perf ? '1' : '0', u: opts.qol ? '1' : '0' }).toString()
+  return new URLSearchParams({ q: text, v: opts.version, l: opts.loader, s: opts.size, p: opts.perf ? '1' : '0', u: opts.qol ? '1' : '0', a: opts.polish ? '1' : '0' }).toString()
 }
 
 async function share() {
@@ -622,6 +622,7 @@ function restoreFromHash() {
   if (h.get('s')) setSeg('size', h.get('s'))
   $('#perf').checked = h.get('p') !== '0'
   $('#qol').checked = h.get('u') !== '0'
+  $('#polish').checked = h.get('a') !== '0'
   $('.typer').classList.add('hidden')
   onInput()
   return true

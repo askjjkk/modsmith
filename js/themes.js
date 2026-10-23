@@ -72,6 +72,21 @@ export const BASE = {
   },
 }
 
+// «Атмосфера и полировка» — по мотивам топовых сборок вроде Lost Souls: анимации, живые звуки, частицы,
+// красивые подсказки. Только клиентские и популярные моды; чего нет под версию — тихо пропускается.
+const POLISH_COMMON = ['not-enough-animations', 'ambientsounds', 'particle-rain', 'cameraoverhaul', 'pick-up-notifier',
+  'legendary-tooltips', 'item-borders', 'enchantment-descriptions', 'better-advancements', 'chat-heads', 'itemphysic-lite',
+  'dynamiccrosshair', 'raised', 'spyglass-improvements', 'sound-physics-remastered', 'entity-model-features',
+  'entitytexturefeatures', 'cherished-worlds', 'item-highlighter', 'particular-reforged', 'subtle-effects']
+BASE.polish = {
+  label: 'Атмосфера и полировка',
+  color: '#b388ff',
+  fabric: [...POLISH_COMMON, 'fallingleaves', 'visuality', 'explosive-enhancement', 'extrasounds', 'presence-footsteps', 'wakes', 'eating-animation', 'lambdynamiclights'],
+  quilt: [...POLISH_COMMON, 'fallingleaves', 'visuality', 'presence-footsteps', 'lambdynamiclights'],
+  forge: [...POLISH_COMMON, 'fallingleavesforge', 'visuality-forge', 'extrasoundsforge'],
+  neoforge: [...POLISH_COMMON, 'fallingleavesforge', 'visuality-forge', 'extrasoundsforge', 'lambdynamiclights'],
+}
+
 // Взаимоисключающие группы: по slug и по названию
 export const GROUPS = [
   { id: 'render', slugs: ['sodium', 'embeddium', 'rubidium', 'optifabric', 'canvas-renderer'], title: /\b(sodium|embeddium|rubidium|optifine)\b/i },

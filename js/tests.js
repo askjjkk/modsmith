@@ -321,6 +321,21 @@ test('комфортные настройки: без сервера и ресу
   eq(plain.file('overrides/options.txt'), null)
 })
 
+// --- эталонная оптимизация ---
+test('база оптимизации берётся из эталонной сборки, плюс моды для чанков', async () => {
+  const projects = {}
+  const versions = {}
+  for (const s of ['sodium', 'lithium', 'zoomify', 'c2me-fabric', 'noisium', 'scalablelux', 'badoptimizations']) { projects[s] = P(s); versions[s] = V(s) }
+  const api = fakeApi({ projects, versions, search: {} })
+  const loadRef = async () => ({ name: 'Fabulously Optimized', license: 'BSD-3-Clause', version: '6.5.0', slugs: ['sodium', 'lithium', 'zoomify'], configs: [{ path: 'config/sodium-options.json', data: new Uint8Array([123, 125]) }] })
+  const pack = await buildPack({ version: '1.21.1', loader: 'fabric', size: 'light', perf: true, qol: false, themes: [], onlyBase: true, loadRef, readMeta: async () => null }, api)
+  eq(pack.mods.map(m => m.project.id), ['sodium', 'lithium', 'zoomify', 'c2me-fabric', 'noisium', 'scalablelux', 'badoptimizations'])
+  eq(pack.mods[0].section.label, 'Оптимизация (как в Fabulously Optimized)')
+  eq(pack.mods.find(m => m.project.id === 'noisium').reason, 'быстрая прогрузка чанков')
+  const zip = await window.JSZip.loadAsync(await mrpackBlob({ files: [] }, window.JSZip, null, pack.ref))
+  eq(!!zip.file('overrides/config/sodium-options.json') && !!zip.file('overrides/config/modsmith-credits.txt'), true)
+})
+
 // --- доктор ---
 test('доктор находит оба виновника из настоящего crash-report', () => {
   const crash = `java.lang.RuntimeException: Could not execute entrypoint stage 'main' due to errors, provided by 'cobbleboss' at 'com.cobbleboss.CobbleBoss'!
@@ -344,6 +359,17 @@ test('доктор не винит моды за безобидные преду
   const log = `[WARN]: Method overwrite conflict for method_21740 in modernfix-common.mixins.json:BiomeMixin from mod modernfix, previously written by lithium. Skipping method.
 [ERROR]: Mixin apply failed sdmshop.mixins.json:TextFieldMixin from mod sdmshop`
   eq(findCulprits(log).map(c => c.id), ['sdmshop'])
+})
+test('доктор понимает latest.log нового загрузчика (knot/ и имя jar)', () => {
+  const log = `org.ladysnake.cca.internal.base.asm.StaticComponentLoadingException: Exception while registering static component factories for Destroying Minecraft (destroying-minecraft)
+	at knot/org.ladysnake.cca.internal.base.asm.StaticComponentPluginBase.processInitializers(StaticComponentPluginBase.java:171) ~[cardinal-components-base-6.1.2.jar:?]
+Caused by: java.lang.NoClassDefFoundError: x/y/Z
+	at knot/com.sp.cca.InitializeComponents.registerEntityComponentFactories(InitializeComponents.java:30) ~[destroying-minecraft-1.0.0.jar:?]`
+  const mods = [
+    { project: { id: 'd', title: 'Destroying Minecraft', slug: 'destroying-minecraft' }, ids: ['destroying_minecraft'], depends: [], file: { filename: 'destroying-minecraft-1.0.0.jar' } },
+    { project: { id: 'c', title: 'Cardinal Components', slug: 'cardinal-components-api' }, ids: ['cardinal_components'], depends: [], file: { filename: 'cardinal-components-api-6.1.2.jar' } },
+  ]
+  eq(diagnose(log, mods).culprits.map(c => c.mod.project.id), ['d'])
 })
 test('доктор понимает окно «Incompatible mods found»', () => {
   const text = "Mod 'Wizards (RPG Series)' (wizards) 3.1.3+1.21.1 requires any version of structure_pool_api, which is missing!"

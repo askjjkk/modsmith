@@ -28,11 +28,26 @@ export function buildIndex({ name, summary, version, loader, loaderVersion, mods
 }
 
 // options: текст options.txt игрока (или null). В .mrpack он лежит в overrides/ — лаунчер сам положит его в профиль.
-export async function mrpackBlob(index, JSZip, options = null) {
+// ref: эталонная сборка оптимизации { name, license, configs: [{ path, data }] } — её конфиги идут в overrides/
+export async function mrpackBlob(index, JSZip, options = null, ref = null) {
   const zip = new JSZip()
   zip.file('modrinth.index.json', JSON.stringify(index, null, 2))
   if (options) zip.file('overrides/options.txt', options)
+  addRefConfigs(zip, 'overrides/', ref)
   return zip.generateAsync({ type: 'blob', mimeType: 'application/x-modrinth-modpack+zip' })
+}
+
+export const REF_CREDITS = {
+  'Fabulously Optimized': 'https://github.com/Fabulously-Optimized/fabulously-optimized (BSD-3-Clause, Copyright (c) Fabulously Optimized contributors)',
+  'Keo Optimized': 'https://modrinth.com/modpack/keo-optimized (CC0-1.0)',
+}
+
+function addRefConfigs(zip, prefix, ref) {
+  if (!ref?.configs?.length) return
+  for (const { path, data } of ref.configs) zip.file(prefix + path, data)
+  zip.file(`${prefix}config/modsmith-credits.txt`,
+    `Конфиги оптимизации взяты из сборки ${ref.name} ${ref.version || ''}: ${REF_CREDITS[ref.name] || ref.license}\r\n` +
+    'Configs are redistributed under their original license. Thanks to the authors!\r\n')
 }
 
 export function readme({ name, version, loader, loaderVersion, mods }) {
@@ -45,7 +60,7 @@ export function readme({ name, version, loader, loaderVersion, mods }) {
     'Как установить:',
     `1. Установите ${ln} для Minecraft ${version} (в TLauncher, Prism или официальном установщике ${ln}).`,
     '2. Откройте папку игры (.minecraft) и папку mods внутри неё (если её нет, создайте).',
-    '3. Скопируйте туда все файлы из папки mods этого архива.',
+    '3. Скопируйте туда все файлы из папки mods этого архива, а папку config (если есть) — в .minecraft с заменой: там настройки оптимизации.',
     `4. Запустите игру с профилем ${ln} ${version}.`,
     '',
     'Проще: откройте файл .mrpack в Modrinth App или Prism Launcher, всё поставится само.',
@@ -61,6 +76,7 @@ export async function modsZipBlob(pack, JSZip, onProgress = () => {}, fetchImpl 
   const zip = new JSZip()
   zip.file('КАК-УСТАНОВИТЬ.txt', readme(pack) + (options ? '\r\n\r\nВаши настройки игры: положите options.txt в папку .minecraft (с заменой).' : ''))
   if (options) zip.file('options.txt', options)
+  addRefConfigs(zip, '', pack.ref)
   const total = pack.mods.reduce((s, m) => s + m.file.size, 0)
   let done = 0
   const queue = [...pack.mods]

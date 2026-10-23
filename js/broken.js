@@ -4,6 +4,8 @@ export const BROKEN = {
   'anarchy-rpg': 'падает на старте со Spell Engine 1.10 (проверено запуском)',
   cobbleboss: 'падает без Cobblemon (проверено запуском)',
   'sdm-shop': 'падает при запуске: нужен SDMCore, которого он не объявляет (проверено запуском)',
+  'autosow-by-neni-o': 'падает при запуске на 1.21.1 (проверено запуском)',
+  'destroying-minecraft': 'падает на старте: ошибка Cardinal Components (проверено запуском)',
 }
 
 const KEY = 'modsmith-blocked'

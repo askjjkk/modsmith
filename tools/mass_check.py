@@ -30,14 +30,37 @@ def fetch(url: str) -> bytes:
         return r.read()
 
 
+def parse_toml(text: str) -> dict:
+    """Минимальный разбор mods.toml: id модов и обязательные зависимости (как в js/jarmeta.js)."""
+    ids, deps = [], []
+    for block in re.split(r"^\s*\[\[", text, flags=re.M)[1:]:
+        head = block[: block.find("]]")].strip()
+        get = lambda key: (re.search(rf"^\s*{key}\s*=\s*[\"']?([^\"'\n#]+)", block, re.M) or [None, None])[1]
+        if head == "mods" and get("modId"):
+            ids.append(norm(get("modId").strip()))
+        elif head.startswith("dependencies") and get("modId"):
+            kind, mandatory = get("type"), get("mandatory")
+            if (kind.strip().lower() == "required") if kind else (mandatory or "true").strip() != "false":
+                deps.append(norm(get("modId").strip()))
+    return {"ids": ids, "depends": deps}
+
+
 def jar_info(path: Path) -> dict:
     try:
         with zipfile.ZipFile(path) as z:
-            j = json.loads(z.read("fabric.mod.json").decode("utf-8", "replace"))
-        ids = [norm(j["id"])] + [norm(p) for p in j.get("provides", [])]
-        return {"ids": ids, "depends": [norm(d) for d in j.get("depends", {})], "name": j.get("name", j["id"])}
-    except Exception:  # noqa: BLE001 — не fabric-мод или битый jar
-        return {"ids": [norm(path.stem)], "depends": [], "name": path.stem}
+            names = set(z.namelist())
+            if "fabric.mod.json" in names:
+                j = json.loads(z.read("fabric.mod.json").decode("utf-8", "replace"))
+                ids = [norm(j["id"])] + [norm(p) for p in j.get("provides", [])]
+                return {"ids": ids, "depends": [norm(d) for d in j.get("depends", {})], "name": j.get("name", j["id"])}
+            for toml in ("META-INF/neoforge.mods.toml", "META-INF/mods.toml"):
+                if toml in names:
+                    info = parse_toml(z.read(toml).decode("utf-8", "replace"))
+                    if info["ids"]:
+                        return {**info, "name": info["ids"][0]}
+    except Exception:  # noqa: BLE001 — битый jar
+        pass
+    return {"ids": [norm(path.stem)], "depends": [], "name": path.stem}
 
 
 # Сервер дошёл до чтения своих настроек: код запуска всех модов к этому моменту уже выполнен.
@@ -49,9 +72,40 @@ def started(log: str) -> bool:
     return any(s in log for s in SUCCESS)
 
 
-def run_server(work: Path, server_jar: Path) -> str:
+def prepare_server(work_root: Path, mc: str, deps: dict, cache: dict) -> tuple:
+    """Готовит сервер под загрузчик. Возвращает (рабочая папка, команда запуска). Ставится один раз на версию."""
+    if "fabric-loader" in deps:
+        loader = deps["fabric-loader"]
+        key = ("fabric", mc, loader)
+        if key not in cache:
+            inst = json.loads(fetch("https://meta.fabricmc.net/v2/versions/installer"))[0]["version"]
+            jar = work_root / f"fabric-server-{mc}-{loader}.jar"
+            jar.write_bytes(fetch(f"https://meta.fabricmc.net/v2/versions/loader/{mc}/{loader}/{inst}/server/jar"))
+            cache[key] = jar
+        return None, ["-jar", str(cache[key]), "nogui"]
+    if "neoforge" in deps or "forge" in deps:
+        neo = "neoforge" in deps
+        ver = deps["neoforge"] if neo else f"{mc}-{deps['forge']}"
+        key = ("neo" if neo else "forge", ver)
+        home = work_root / f"{'neoforge' if neo else 'forge'}-{ver}"
+        if key not in cache:
+            if not (home / "libraries").exists():
+                home.mkdir(parents=True, exist_ok=True)
+                url = (f"https://maven.neoforged.net/releases/net/neoforged/neoforge/{ver}/neoforge-{ver}-installer.jar" if neo
+                       else f"https://maven.minecraftforge.net/net/minecraftforge/forge/{ver}/forge-{ver}-installer.jar")
+                installer = home / "installer.jar"
+                installer.write_bytes(fetch(url))
+                subprocess.run(["java", "-jar", str(installer), "--installServer", str(home)], cwd=home,
+                               capture_output=True, timeout=900)
+            cache[key] = home
+        lib = f"libraries/net/neoforged/neoforge/{ver}" if neo else f"libraries/net/minecraftforge/forge/{ver}"
+        return home, [f"@{lib}/win_args.txt", "nogui"]
+    raise ValueError("неизвестный загрузчик")
+
+
+def run_server(work: Path, args: list) -> str:
     # headless: окна-«сторожа» модов (owo-sentinel и т.п.) не откроются и не повесят проверку
-    proc = subprocess.Popen(["java", "-Djava.awt.headless=true", "-Xmx6G", "-jar", str(server_jar), "nogui"], cwd=work,
+    proc = subprocess.Popen(["java", "-Djava.awt.headless=true", "-Xmx6G", *args], cwd=work,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
                             errors="replace")
     lines = []
@@ -73,17 +127,25 @@ def run_server(work: Path, server_jar: Path) -> str:
     return "\n".join(lines)
 
 
-def culprits(log: str, by_id: dict) -> dict:
+def culprits(log: str, by_id: dict, files_by_name: dict = None) -> dict:
     """{имя файла: причина} — какие jar виноваты"""
     found = {}
+    files_by_name = files_by_name or {}
 
     def add(mod_id, why):
         f = by_id.get(norm(mod_id))
         if f and norm(mod_id) not in PLATFORM and f not in found:
             found[f] = why
 
+    for m in re.finditer(r"Exception while [^(\n]+\(([a-z0-9_\-]+)\)", log):
+        add(m.group(1), "упал при запуске")
     for m in re.finditer(r"provided by '([^']+)'", log):
         add(m.group(1), "упал при запуске")
+    # Forge/NeoForge: «Mod ID: 'x', Requested by: 'y'» и «Mod y requires x»
+    for m in re.finditer(r"Requested by: '([^']+)'", log):
+        add(m.group(1), "нет обязательной зависимости")
+    for m in re.finditer(r"Mod (\S+) (?:only supports|requires) ", log):
+        add(m.group(1).strip("'"), "несовместим по версии")
     for m in re.finditer(r"Mod '[^']+' \(([^)]+)\) \S+ requires .*?(\S+), which is missing", log):
         add(m.group(1), f"нет зависимости {m.group(2)}")
     # «from mod X» бывает и в безобидных WARN — виним только строки с настоящей ошибкой встраивания
@@ -96,8 +158,16 @@ def culprits(log: str, by_id: dict) -> dict:
         if re.match(r"^\s*(Caused by:|Suppressed:|[\w.$]+(Exception|Error)\b)", line):
             searching = True
             continue
-        frame = re.match(r"^\s*at (?:knot//)?([a-zA-Z_][\w.$<>]+)\(", line) if searching else None
+        frame = re.match(r"^\s*at (?:knot/{1,2})?([a-zA-Z_][\w.$<>]+)\(", line) if searching else None
         if not frame:
+            continue
+        # в latest.log у строки стека есть имя файла мода: «~[destroying-minecraft-1.0.0.jar:?]»
+        jar = re.search(r"\[([^\[\]]+\.jar)", line)
+        if jar and jar.group(1) in files_by_name:
+            name = jar.group(1)
+            if name not in found and not any(i in PLATFORM for i in files_by_name[name]):
+                found[name] = "его код упал (стек)"
+            searching = False
             continue
         for seg in frame.group(1).split(".")[:-1]:
             s = norm(seg)
@@ -110,19 +180,18 @@ def culprits(log: str, by_id: dict) -> dict:
 
 def check_pack(index_path: Path, work_root: Path, server_jars: dict) -> dict:
     index = json.loads(index_path.read_text(encoding="utf-8"))
-    mc, loader = index["dependencies"]["minecraft"], index["dependencies"].get("fabric-loader")
-    work = work_root / index_path.stem
+    deps = index["dependencies"]
+    home, args = prepare_server(work_root, deps["minecraft"], deps, server_jars)
+    work = home or work_root / index_path.stem  # Forge/NeoForge — общая папка сервера, Fabric — своя на сборку
     mods = work / "mods"
     mods.mkdir(parents=True, exist_ok=True)
     for old in mods.glob("*.jar"):
         old.unlink()
-    key = (mc, loader)
-    if key not in server_jars:
-        inst = json.loads(fetch("https://meta.fabricmc.net/v2/versions/installer"))[0]["version"]
-        path = work_root / f"fabric-server-{mc}-{loader}.jar"
-        path.write_bytes(fetch(f"https://meta.fabricmc.net/v2/versions/loader/{mc}/{loader}/{inst}/server/jar"))
-        server_jars[key] = path
-    server_jar = server_jars[key]
+    for old in (work / "config",):  # конфиги прошлой сборки не должны влиять на следующую
+        if old.exists() and home:
+            for f in old.rglob("*"):
+                if f.is_file():
+                    f.unlink()
 
     files = [f for f in index["files"] if f["env"]["server"] != "unsupported"]
     project_of = {}
@@ -142,11 +211,11 @@ def check_pack(index_path: Path, work_root: Path, server_jars: dict) -> dict:
     for attempt in range(8):
         infos = {p.name: jar_info(p) for p in mods.glob("*.jar")}
         by_id = {i: name for name, info in infos.items() for i in info["ids"]}
-        log = run_server(work, server_jar)
-        (work / f"try{attempt}.log").write_text(log, encoding="utf-8")
+        log = run_server(work, args)
+        (work_root / f"{index_path.stem}-try{attempt}.log").write_text(log, encoding="utf-8")
         if started(log):
             return {"pack": index_path.stem, "ok": True, "attempts": attempt + 1, "mods": len(infos), "removed": removed}
-        bad = culprits(log, by_id)
+        bad = culprits(log, by_id, {name: info['ids'] for name, info in infos.items()})
         if not bad:
             return {"pack": index_path.stem, "ok": False, "attempts": attempt + 1, "mods": len(infos), "removed": removed,
                     "tail": log.splitlines()[-25:]}
@@ -174,7 +243,7 @@ def main(work_root: str) -> None:
     work_root = Path(work_root)
     work_root.mkdir(parents=True, exist_ok=True)
     results, server_jars = [], {}
-    for index_path in sorted((ROOT / "out" / "packs").glob("*.json")):
+    for index_path in sorted((ROOT / "out" / (sys.argv[2] if len(sys.argv) > 2 else "packs")).glob("*.json")):
         res = check_pack(index_path, work_root, server_jars)
         results.append(res)
         print(json.dumps({k: v for k, v in res.items() if k != "tail"}, ensure_ascii=False), flush=True)
