@@ -21,6 +21,7 @@ export async function gen(dir, requests, log = console.log) {
       version: r.version, loader: r.loader, size: r.size || p.size || 'normal',
       perf: true, qol: true, polish: r.polish !== false, themes, excluded: p.excluded, blocked: allBlocked(),
       onlyBase: !!p.settings?.onlyBase,
+      voice: !!p.settings?.voice,
     }
     const t0 = Date.now()
     try {

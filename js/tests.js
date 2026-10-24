@@ -5,10 +5,11 @@ import { THEMES } from './themes.js'
 import { diagnose, examineLog, findCulprits, modsFromLog } from './doctor.js'
 import { INTENTS } from './intents.js'
 import { COMFORT_OPTIONS } from './comfort-options.js'
-import { PackBuilder, buildPack, bundles, groupOf, libVersion, majorMinor, matchesTheme, missingBase, pickVersion } from './builder.js'
+import { PackBuilder, budgetOf, buildPack, bundles, updatePack, groupOf, libVersion, majorMinor, matchesTheme, missingBase, pickVersion } from './builder.js'
 import { rangeFits } from './versions.js'
 import { buildIndex, mrpackBlob, serverScripts } from './mrpack.js'
-import { detectGraphics, graphicsConfigs } from './graphics.js'
+import { detectGraphics, graphicsConfigs, packCount, shaderCount } from './graphics.js'
+import { requirements, surprise } from './extras.js'
 import { isPlatform, nestedIds, parseFabric, parseToml } from './jarmeta.js'
 
 const results = []
@@ -404,6 +405,51 @@ test('вложенные библиотеки и отрицание до пре�
   eq(analyze('без магии и драконов').excluded.map(t => t.id).sort().filter(i => ['magic', 'dragons'].includes(i)), ['dragons', 'magic'])
 })
 
+test('размер: пресеты, число с ползунка, «гигантская», «500 модов»', () => {
+  eq(budgetOf('giant'), 300)
+  eq(budgetOf('big'), 45)
+  eq(budgetOf(750), 750)
+  eq(parse('гигантская сборка').size, 'giant')
+  eq(parse('сервер на 500 модов').size, 500)
+  eq(parse('мини-карта и магия').size, 'light')
+})
+test('«сервер» в запросе включает голосовой чат, «без сервера» — нет', () => {
+  eq(!!parse('магия на сервере с друзьями').settings.voice, true)
+  eq(!!parse('магия без сервера').settings.voice, false)
+})
+test('число ресурспаков растёт с размером до 100, шейдеров — до 10', () => {
+  eq([packCount(8), packCount(20), packCount(45), packCount(300), packCount(1000)], [3, 8, 20, 40, 100])
+  eq(packCount(2000), 100)
+  eq([shaderCount(8), shaderCount(45), shaderCount(300), shaderCount(1000)], [1, 2, 4, 10])
+})
+test('требования к ПК: растут с числом модов и шейдерами', () => {
+  const a = requirements({ modCount: 50 }), b = requirements({ modCount: 500, shaders: 4, packs: 60 })
+  eq(b.gameRam > a.gameRam, true)
+  eq(a.gpu !== b.gpu, true)
+  eq(b.text.includes('ГБ'), true)
+})
+test('«Удиви меня» даёт 3–5 разных настоящих тем', () => {
+  for (let i = 0; i < 20; i++) {
+    const r = surprise()
+    eq(r.themes.length >= 3 && r.themes.length <= 5 && new Set(r.themes).size === r.themes.length, true)
+    eq(r.themes.every(id => THEME_BY_ID.has(id) && !/^(mod|q):/.test(id)), true)
+  }
+})
+test('обновление старой сборки: моды переносятся на новую версию, чего нет — в отсеянное с причиной', async () => {
+  const ver = id => ({ id: `v-${id}`, version_number: '1.0', version_type: 'release', date_published: '2026-01-01', dependencies: [],
+    files: [{ primary: true, url: `https://cdn/${id}.jar`, filename: `${id}.jar`, size: 10, hashes: { sha1: 'a', sha512: 'b' } }] })
+  const api = fakeApi({ projects: { aaa: P('aaa'), bbb: P('bbb') }, versions: { aaa: [ver('aaa')], bbb: [] }, search: {} })
+  const index = { name: 'Старая', files: [
+    { path: 'mods/a.jar', downloads: ['https://cdn.modrinth.com/data/aaa/versions/1/a.jar'] },
+    { path: 'mods/b.jar', downloads: ['https://cdn.modrinth.com/data/bbb/versions/1/b.jar'] },
+    { path: 'mods/c.jar', downloads: ['https://example.com/c.jar'] },
+  ] }
+  const pack = await updatePack(index, { version: '1.21.1', loader: 'fabric', readMeta: async () => null }, api)
+  eq(pack.mods.map(m => m.project.id), ['aaa'])
+  eq(pack.skipped.some(x => x.title === 'B' || x.title === 'BBB'), true)
+  eq(pack.skipped.some(x => x.title.startsWith('Файлы не с Modrinth')), true)
+})
+
 // --- понимание запроса v2 ---
 test('отрицание: «но без хоррора»', () => {
   const a = analyze('магия и драконы, но без хоррора')
@@ -470,12 +516,12 @@ test('частые слова не становятся темами', () => {
   eq(a.themes.filter(t => t.via === 'опечатка').map(t => t.word), [])
 })
 test('у тем чистые id и поисковые запросы', () => {
-  eq(THEMES.filter(t => !/^[a-z_]+$/.test(t.id)).map(t => t.id), [])
+  eq(THEMES.filter(t => !/^([a-z_]+|q:[a-z' -]+|mod:[a-z0-9_-]+)$/.test(t.id)).map(t => t.id), [])
   eq(THEMES.filter(t => t.queries.some(q => q.includes('='))).map(t => t.id), [])
   eq(THEMES.filter(t => !t.queries.length).map(t => t.id), [])
 })
-test('320+ тем, у всех намерений существующие темы', () => {
-  eq(THEMES.length >= 320, true, `тем ${THEMES.length}`)
+test('1000+ тем, у всех намерений существующие темы', () => {
+  eq(THEMES.length >= 1000, true, `тем ${THEMES.length}`)
   const bad = INTENTS.flatMap(i => [...(i.themes || []), ...(i.exclude || [])]).filter(id => !THEME_BY_ID.has(id))
   eq(bad, [])
 })

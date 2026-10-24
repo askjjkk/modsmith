@@ -69,7 +69,16 @@
           <button type="button" role="radio" data-value="light">Лёгкая</button>
           <button type="button" role="radio" data-value="normal">Обычная</button>
           <button type="button" role="radio" data-value="big">Большая</button>
+          <button type="button" role="radio" data-value="giant">Гигантская</button>
           <span class="seg-pill" aria-hidden="true"></span>
+        </div>
+      </div>
+      <div class="control">
+        <span class="control-label">Модов по темам</span>
+        <div class="count">
+          <input type="range" id="mod-count" min="5" max="1000" step="5" value="20" aria-label="Сколько модов по темам">
+          <output id="mod-count-out" for="mod-count">20</output>
+          <small class="count-hint" id="mod-count-hint">плюс оптимизация, удобства и библиотеки</small>
         </div>
       </div>
       <div class="control toggles">
@@ -81,15 +90,28 @@
       <div class="control">
         <span class="control-label">Графика</span>
         <div class="gfx">
-          <label class="lever" title="Красивый свет, тени и вода. Сам поставлю мод для шейдеров (Iris или Oculus) и включу шейдер в игре. На слабом ПК выберите MakeUp."><input type="checkbox" id="shaders"><span class="lever-track"><span class="lever-knob"></span></span>Шейдеры</label>
+          <label class="lever" title="Красивый свет, тени и вода. Сам поставлю мод для шейдеров (Iris или Oculus) и включу шейдер в игре. На слабом ПК выберите MakeUp."><input type="checkbox" id="shaders" checked><span class="lever-track"><span class="lever-knob"></span></span>Шейдеры</label>
           <div class="select"><select id="shader-pick" aria-label="Какие шейдеры"></select></div>
-          <label class="lever" title="Ресурспаки, которые делают игру живее и ничего не ломают. Включатся в игре сами."><input type="checkbox" id="rpacks"><span class="lever-track"><span class="lever-knob"></span></span>Ресурспаки</label>
-          <div class="rp-list" id="rp-list"></div>
+          <label class="lever" title="Ресурспаки подбираются под темы сборки и её размер (до 100), без конфликтов друг с другом. Включатся в игре сами."><input type="checkbox" id="rpacks" checked><span class="lever-track"><span class="lever-knob"></span></span>Ресурспаки</label>
+          <div class="rp-count" id="rp-list">
+            <input type="range" id="rp-count" min="0" max="100" step="1" value="8" aria-label="Сколько ресурспаков">
+            <output id="rp-count-out" for="rp-count">8</output>
+            <button type="button" class="rp-auto" id="rp-auto" title="Число ресурспаков зависит от размера сборки">авто</button>
+          </div>
         </div>
       </div>
     </div>
 
     <button class="craft" id="craft" type="button"><span class="craft-shine" aria-hidden="true"></span><span class="craft-text">Скрафтить сборку</span></button>
+    <div class="craft-more">
+      <button class="btn btn-ghost" id="surprise" type="button" title="Случайная сборка по настроению: 3–5 тем и размер на ваш вкус"><span class="btn-text">🎲 Удиви меня</span></button>
+      <button class="btn btn-ghost" id="update-btn" type="button" title="Загрузите свой старый .mrpack, и я перенесу его моды на выбранную выше версию игры и загрузчик"><span class="btn-text">⟳ Обновить старую сборку</span></button>
+      <input type="file" id="update-file" accept=".mrpack,.zip" hidden>
+    </div>
+    <details class="profiles" id="profiles" hidden>
+      <summary>Мои сборки <small id="profiles-count"></small></summary>
+      <div id="profiles-list"></div>
+    </details>
   </section>
 
   <section class="crafting glass" id="crafting" hidden aria-live="polite">
@@ -112,9 +134,11 @@
         <button class="btn btn-primary" id="dl-mrpack" type="button"><span class="btn-fill"></span><span class="btn-text">Скачать .mrpack</span></button>
         <button class="btn" id="dl-zip" type="button"><span class="btn-fill"></span><span class="btn-text">Архив с модами</span></button>
         <button class="btn" id="dl-server" type="button" title="Архив для своего сервера: моды, которые работают на сервере, и start.bat, который сам скачает ядро сервера"><span class="btn-fill"></span><span class="btn-text">Серверная сборка</span></button>
+        <button class="btn btn-ghost" id="save-profile" type="button" title="Запомнить эту сборку в вашем браузере, чтобы вернуться к ней позже"><span class="btn-text">Сохранить у себя</span></button>
         <button class="btn btn-ghost" id="share" type="button"><span class="btn-text">Поделиться</span></button>
       </div>
       <p class="hint empty-themes" id="empty-themes" hidden></p>
+      <p class="hint req" id="req"></p>
       <p class="hint">.mrpack открывается в Modrinth App, Prism Launcher и ATLauncher, моды скачаются сами. Архив подойдёт для TLauncher: распакуйте папку mods в .minecraft.</p>
     </div>
     <div id="sections"></div>

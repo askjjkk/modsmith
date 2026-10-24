@@ -205,6 +205,21 @@ button.chip:hover { transform: translateY(-2px); filter: brightness(1.15); }
 .diag-block.warn h3 { color: var(--gold); }
 .diag-block.bad h3 { color: #ffb3ad; }
 .diag-fix { display: block; color: var(--xp); font-size: 14px; margin-top: 2px; }
+.craft-more { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.craft-more .btn { padding: 9px 16px; font-size: 14px; }
+.profiles { margin-top: 14px; border-radius: 14px; background: rgba(5, 8, 18, .4); border: 1px solid var(--glass-brd); padding: 10px 14px; }
+.profiles summary { cursor: pointer; color: var(--muted); font-weight: 600; font-size: 14px; }
+.profiles summary small { margin-left: 6px; padding: 1px 7px; border-radius: 8px; background: rgba(255, 255, 255, .07); }
+.profile { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid rgba(255, 255, 255, .06); animation: rise .35s var(--smooth) both; }
+.profile:first-child { border-top: 0; margin-top: 6px; }
+.profile-name { flex: 1; min-width: 0; font-size: 14px; }
+.profile-name b { display: block; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-name small { color: var(--muted); }
+.profile button { padding: 5px 11px; font: 600 12px var(--body); color: var(--text); cursor: pointer; background: rgba(255, 255, 255, .06);
+  border: 1px solid rgba(255, 255, 255, .12); border-radius: 9px; transition: border-color .2s, transform .25s var(--spring); }
+.profile button:hover { border-color: var(--xp); transform: translateY(-1px); }
+.profile .del:hover { border-color: var(--redstone); color: #ffb3ad; }
+.req { color: var(--diamond); }
 .doctor-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .diag-result { margin-top: 16px; }
 .diag-result p { color: var(--text); margin-bottom: 8px; }
@@ -225,13 +240,24 @@ button.chip:hover { transform: translateY(-2px); filter: brightness(1.15); }
 .gfx .select { transition: opacity .25s; }
 .gfx #shader-pick { max-width: min(380px, 80vw); }
 .dim { opacity: .45; }
-.rp-list { display: flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; transition: opacity .25s; }
+.rp-count { display: flex; align-items: center; gap: 10px; transition: opacity .25s; }
+#rp-count { width: min(220px, 50vw); accent-color: var(--gold); cursor: pointer; }
+#rp-count-out { min-width: 34px; font: 700 18px var(--display); color: var(--gold); }
+.rp-auto { padding: 3px 10px; font: 600 12px var(--body); color: var(--muted); cursor: pointer; background: rgba(255, 255, 255, .05);
+  border: 1px solid rgba(255, 255, 255, .12); border-radius: 8px; transition: color .2s, border-color .2s; }
+.rp-auto.on { color: var(--xp); border-color: rgba(125, 255, 106, .5); }
 .rp { display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px 5px 8px; font: 600 13px var(--body); color: #c9cfe0; cursor: pointer;
   background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 255, 255, .1); border-radius: 9px; transition: border-color .2s, background .2s; }
 .rp:hover { border-color: rgba(255, 207, 74, .45); }
 .rp input { appearance: none; width: 14px; height: 14px; margin: 0; border-radius: 4px; border: 2px solid rgba(255, 255, 255, .3); display: grid; place-items: center; transition: background .2s, border-color .2s; }
 .rp input:checked { background: var(--gold); border-color: var(--gold); }
 .rp:has(input:checked) { background: rgba(255, 207, 74, .1); border-color: rgba(255, 207, 74, .4); color: var(--text); }
+.count { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+#mod-count { width: min(340px, 60vw); accent-color: var(--xp); cursor: pointer; }
+#mod-count-out { min-width: 48px; font: 700 20px var(--display); color: var(--xp); text-shadow: 0 0 10px rgba(125, 255, 106, .5); }
+.count-hint { color: var(--muted); font-size: 13px; flex-basis: 100%; }
+.count-hint.warn { color: var(--gold); }
+.seg.custom .seg-pill { opacity: 0; }
 .select { position: relative; width: max-content; }
 .select::after { content: ''; position: absolute; right: 14px; top: 50%; width: 8px; height: 8px; border: solid var(--muted); border-width: 0 2px 2px 0; transform: translateY(-70%) rotate(45deg); pointer-events: none; }
 #version, .select select {

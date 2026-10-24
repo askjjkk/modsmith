@@ -184,6 +184,12 @@ const QUILT_FABRIC = { '0.30': '0.19.3', '0.29': '0.16.10' }
 // NeoForge до 1.21.6 не читает описание без строки modLoader («Missing ModLoader in file»)
 const OLD_NEO = mc => cmpVer(mc, '1.21.6') < 0
 
+// Пары, которые вместе не работают, хотя не все авторы это указали (по слагам, в обе стороны)
+const INCOMPATIBLE_SLUGS = {
+  'moonrise-opt': ['scalablelux', 'starlight', 'starlight-neoforge', 'c2me-neoforge', 'c2me-fabric', 'canary', 'not-enough-crashes'],
+}
+const slugsClash = (a, b) => INCOMPATIBLE_SLUGS[a]?.includes(b) || INCOMPATIBLE_SLUGS[b]?.includes(a)
+
 const incompatibleIds = version => (version.dependencies || [])
   .filter(d => d.dependency_type === 'incompatible' && d.project_id).map(d => d.project_id)
 
@@ -213,6 +219,7 @@ export class PackBuilder {
     if (incompatibleIds(version).some(id => this.chosen.has(id))) return 'несовместим с уже выбранным модом'
     for (const m of this.chosen.values()) {
       if (m.incompatible.includes(project.id)) return `несовместим с ${m.project.title}`
+      if (slugsClash(project.slug, m.project.slug)) return `несовместим с ${m.project.title}`
     }
     return null
   }
@@ -320,20 +327,26 @@ export class PackBuilder {
     this.onMod?.(mod)
   }
 
-  async candidates(theme) {
+  // want — сколько модов нужно от темы: для больших сборок ищем глубже (больше результатов и страниц)
+  async candidates(theme, want = 10) {
     const opts = { version: this.version, loaders: this.loaders }
     const category = theme.categories?.[0]
+    const limit = Math.min(100, Math.max(20, want * 3))
+    const deep = want > 30 ? [100, 200].filter(o => o < want * 3) : []
     const lists = await Promise.all([
       this.api.projects(theme.pinned || []),
-      ...theme.queries.map(q => this.api.search(q, { ...opts, category })),
+      ...theme.queries.map(q => this.api.search(q, { ...opts, category, limit })),
+      ...deep.map(offset => this.api.search(theme.queries[0], { ...opts, category, limit: 100, offset })),
       // без категории ищем только для тем, у которых её нет: иначе много случайного
-      ...(category ? [] : theme.queries.slice(0, 1).map(q => this.api.search(q, { ...opts, limit: 30 }))),
+      ...(category ? [] : theme.queries.slice(0, 1).map(q => this.api.search(q, { ...opts, limit: Math.max(30, limit) }))),
     ])
     const pinned = new Set((lists[0] || []).map(p => p.id))
     const seen = new Map()
     for (const p of lists.flat()) if (p && !seen.has(p.id) && !isLibrary(p)) seen.set(p.id, p)
     const score = p => (pinned.has(p.id) ? 100 : 0) + themeScore(theme, p)
-    let pool = [...seen.values()].filter(p => (pinned.has(p.id) || p.downloads >= MIN_DOWNLOADS) && !THEME_AVOID[theme.id]?.includes(p.slug))
+    // в больших сборках порог скачиваний мягче: популярных модов на тему просто не хватит
+    const minDl = want > 30 ? 3000 : MIN_DOWNLOADS
+    let pool = [...seen.values()].filter(p => (pinned.has(p.id) || p.downloads >= minDl) && !THEME_AVOID[theme.id]?.includes(p.slug))
     if (!category) {
       // у темы нет категории на Modrinth: берём только моды со словом темы в названии
       const strict = pool.filter(p => pinned.has(p.id) || titleMatches(theme, p))
@@ -657,6 +670,106 @@ export class PackBuilder {
   }
 }
 
+// сколько тематических модов: пресет («big») или число с ползунка
+export const budgetOf = size => (typeof size === 'number' ? size : Number(size) > 0 ? Number(size) : SIZES[size] || SIZES.normal)
+
+// Категории Modrinth для добора больших сборок, от самых «безопасных» к узким
+const FILL_CATEGORIES = [['adventure', 'Приключения'], ['decoration', 'Декор и стройка'], ['worldgen', 'Мир и постройки'],
+  ['mobs', 'Существа'], ['equipment', 'Снаряжение'], ['food', 'Еда'], ['game-mechanics', 'Механики'], ['utility', 'Удобства'],
+  ['storage', 'Хранение'], ['transportation', 'Транспорт'], ['magic', 'Магия'], ['technology', 'Техника']]
+
+/** Добирает до need модов популярным из категорий, подходящих к запросу. Возвращает, сколько добавил. */
+async function fillUp(b, api, opts, need, themes, onAdd) {
+  const asked = new Set(themes.flatMap(t => t.theme.categories || []))
+  const banned = new Set((opts.excluded || []).flatMap(t => t.categories || []))
+  // сначала категории, которые есть у выбранных тем, потом остальные
+  const cats = FILL_CATEGORIES.filter(([c]) => !banned.has(c)).sort((x, y) => asked.has(y[0]) - asked.has(x[0]))
+  const state = cats.map(() => ({ offset: 0, pool: [], done: false }))
+  let added = 0
+  for (let round = 0; added < need && round < 400; round++) {
+    let progressed = false
+    for (let i = 0; i < cats.length && added < need; i++) {
+      const st = state[i]
+      if (st.done) continue
+      if (!st.pool.length) {
+        if (st.offset >= 600) { st.done = true; continue }
+        const page = await api.search('', { version: opts.version, loaders: b.loaders, category: cats[i][0], limit: 100, offset: st.offset, index: 'downloads' })
+        st.offset += 100
+        st.pool = page.filter(p => p.downloads >= 2000 && !isLibrary(p) && !b.chosen.has(p.id))
+        if (!page.length) { st.done = true; continue }
+      }
+      while (st.pool.length) {
+        const p = st.pool.shift()
+        const section = { id: `more-${cats[i][0]}`, label: `Ещё: ${cats[i][1]}`, color: '#90a4ae' }
+        if (await b.tryAdd(p, section, 'популярное в этой категории', { quiet: true })) {
+          added++
+          progressed = true
+          onAdd(added)
+          break
+        }
+      }
+    }
+    if (!progressed && state.every(s => s.done)) break
+  }
+  return added
+}
+
+/** Общий «хвост» сборки: проверка файлов внутри модов, id для «Доктора», серверные библиотеки. Возвращает extras без бесполезных шейдеров. */
+async function finishPack(b, api, opts, extras = []) {
+  b.loaderVersion = await api.loaderVersion(opts.loader, opts.version)
+  await b.verifyJars()
+  // если мод для шейдеров не прошёл проверку — шейдер без него бесполезен
+  const shaderModOk = b.mods().some(m => m.project.slug === SHADER_MOD[opts.loader])
+  const kept = extras.filter(e => e.kind !== 'shader' || shaderModOk)
+  // внутренние id и зависимости модов: по ним «Доктор» найдёт мод в crash-report
+  for (const m of b.mods()) {
+    const meta = await b.metaOf(m).catch(() => null)
+    m.ids = [...new Set([...(meta?.ids || []), norm(m.project.slug)])]
+    m.depends = meta?.depends || []
+  }
+  // библиотека помечена «только для игры», но её требует серверный мод (Simply Swords -> Simply Tooltips):
+  // на сервере без неё падение, значит ставим и туда
+  const byId = new Map(b.mods().flatMap(m => m.ids.map(id => [id, m])))
+  for (const m of b.mods()) {
+    if (m.project.server === 'unsupported') continue
+    for (const dep of m.depends) {
+      const lib = byId.get(dep)
+      if (lib && lib.project.server === 'unsupported' && !CLIENT_ONLY[lib.project.slug]) lib.project = { ...lib.project, server: 'required' }
+    }
+  }
+  return kept
+}
+
+/**
+ * «Обновить сборку»: берёт старый .mrpack (его modrinth.index.json) и переносит моды на другую версию игры или загрузчик.
+ * Что не вышло под новую версию — в списке отсеянного с причиной. Настройки (overrides) не переносятся.
+ */
+export async function updatePack(index, opts, api, emit = () => {}) {
+  const b = new PackBuilder(api, { version: opts.version, loader: opts.loader, blocked: opts.blocked || {} }, opts.readMeta ? { readMeta: opts.readMeta } : {})
+  b.onMod = mod => emit({ type: 'mod', mod })
+  const progress = (value, text) => emit({ type: 'progress', value, text })
+  const ids = [...new Set((index.files || []).filter(f => /^mods\//.test(f.path))
+    .map(f => f.downloads?.[0]?.match(/\/data\/([^/]+)\//)?.[1]).filter(Boolean))]
+  progress(0.1, `В старой сборке ${ids.length} модов с Modrinth, ищу их под ${opts.version}…`)
+  const projects = await api.projects(ids)
+  const section = { id: 'old', label: 'Из старой сборки', color: '#80cbc4' }
+  let done = 0
+  // версии всех модов запрашиваем сразу пачкой — потом выбор идёт из кэша, а не по одному запросу на мод
+  await Promise.all(projects.map(p => b.versionFor(p.id).catch(() => null)))
+  // сначала не-библиотеки: библиотеки сами придут как зависимости, а лишние отсеются
+  const order = [...projects].sort((x, y) => Number(isLibrary(x)) - Number(isLibrary(y)))
+  for (const p of order) {
+    await b.tryAdd(p, section, 'был в старой сборке', { allowLibrary: true })
+    progress(0.1 + 0.7 * (++done / order.length), p.title)
+  }
+  const foreign = (index.files || []).filter(f => /^mods\//.test(f.path) && !f.downloads?.[0]?.includes('/data/')).length
+  if (foreign) b.skipped.push({ title: `Файлы не с Modrinth (${foreign})`, why: 'их источник не Modrinth, перенести нельзя — скачайте новые версии вручную' })
+  progress(0.85, 'Заглядываю внутрь модов: что им нужно на самом деле…')
+  await finishPack(b, api, opts)
+  progress(1, 'Готово')
+  return { mods: b.mods(), extras: [], skipped: b.skipped, emptyThemes: [], loaderVersion: b.loaderVersion, version: opts.version, loader: opts.loader, builder: b, ref: null }
+}
+
 // Мод везёт эту библиотеку внутри себя: имя вложенного файла похоже на id зависимости
 export function bundles(meta, dep) {
   return (meta?.nested || []).some(n => n.length >= 4 && (dep.includes(n) || n.includes(dep)))
@@ -710,14 +823,20 @@ export async function buildPack(opts, api, emit = () => {}) {
     }
   }
 
+  // «сервер» в описании — голосовой чат, чтобы говорить с друзьями прямо в игре
+  if (opts.voice) {
+    const [voice] = await api.projects(['simple-voice-chat'])
+    if (voice) await b.tryAdd(voice, { id: 'qol', label: BASE.qol.label, color: BASE.qol.color }, 'голосовой чат для сервера', { allowLibrary: true, quiet: true })
+  }
+
   // «только оптимизация»: тематические моды не нужны вовсе
   // шейдер уже выбран в «Графике» — темы «Графика»/«Шейдеры» не нужны: они тянут случайные моды вокруг шейдеров
   const asked = opts.graphics?.shader ? opts.themes.filter(t => !['shaders', 'graphics'].includes(t.theme.id)) : opts.themes
   const themes = opts.onlyBase ? [] : asked.length ? asked : [{ theme: VANILLA_PLUS, word: null }]
-  const budget = SIZES[opts.size] || SIZES.normal
+  const budget = budgetOf(opts.size)
   const quota = Math.max(2, Math.ceil(budget / themes.length))
-  progress(0.25, 'Ищу моды по темам…')
-  const pools = await Promise.all(themes.map(t => b.candidates(t.theme)))
+  progress(0.25, budget > 100 ? `Ищу моды по темам: нужно ${budget}, это займёт несколько минут…` : 'Ищу моды по темам…')
+  const pools = await Promise.all(themes.map(t => b.candidates(t.theme, quota)))
   // прогрев версий для первых кандидатов каждой темы
   await Promise.all(pools.flatMap(pool => pool.slice(0, quota * 2).map(p => b.versionFor(p.id).catch(() => null))))
 
@@ -745,35 +864,21 @@ export async function buildPack(opts, api, emit = () => {}) {
     if (!progressed) break
   }
 
+  // тем мало для такого размера — добираем популярное из подходящих категорий (запреты «без …» соблюдаются в tryAdd)
+  if (added < budget && !opts.onlyBase) {
+    progress(0.8, `Добираю до ${budget} модов популярным из подходящих категорий…`)
+    added += await fillUp(b, api, opts, budget - added, themes, n => progress(0.8 + 0.08 * Math.min(1, (added + n) / budget), `Набрано ${added + n} из ${budget}`))
+  }
+
   // шейдеры и ресурспаки — только если попросили
   let extras = []
-  if (opts.graphics?.shader || opts.graphics?.packs?.length) {
+  if (opts.graphics?.shader || opts.graphics?.packs > 0) {
     progress(0.88, 'Добавляю графику: шейдеры и ресурспаки…')
-    extras = await addGraphics(b, api, opts.graphics)
+    extras = await addGraphics(b, api, opts.graphics, themes)
   }
 
   progress(0.9, 'Заглядываю внутрь модов: что им нужно на самом деле…')
-  b.loaderVersion = await api.loaderVersion(opts.loader, opts.version)
-  await b.verifyJars()
-  // если мод для шейдеров не прошёл проверку — шейдер без него бесполезен
-  const shaderModOk = b.mods().some(m => m.project.slug === SHADER_MOD[opts.loader])
-  extras = extras.filter(e => e.kind !== 'shader' || shaderModOk)
-  // внутренние id и зависимости модов: по ним «Доктор» найдёт мод в crash-report
-  for (const m of b.mods()) {
-    const meta = await b.metaOf(m).catch(() => null)
-    m.ids = [...new Set([...(meta?.ids || []), norm(m.project.slug)])]
-    m.depends = meta?.depends || []
-  }
-  // библиотека помечена «только для игры», но её требует серверный мод (Simply Swords -> Simply Tooltips):
-  // на сервере без неё падение, значит ставим и туда
-  const byId = new Map(b.mods().flatMap(m => m.ids.map(id => [id, m])))
-  for (const m of b.mods()) {
-    if (m.project.server === 'unsupported') continue
-    for (const dep of m.depends) {
-      const lib = byId.get(dep)
-      if (lib && lib.project.server === 'unsupported' && !CLIENT_ONLY[lib.project.slug]) lib.project = { ...lib.project, server: 'required' }
-    }
-  }
+  extras = await finishPack(b, api, opts, extras)
   progress(0.96, 'Проверяю загрузчик…')
   const loaderVersion = b.loaderVersion
   progress(1, 'Готово')

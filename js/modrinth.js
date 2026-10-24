@@ -68,11 +68,19 @@ export function createApi({ fetchImpl = (...a) => fetch(...a), concurrency = 6 }
     getJson,
 
     // Поиск модов под версию и загрузчик; category — необязательная категория
-    async search(query, { version, loaders, category, limit = 20 }) {
+    async search(query, { version, loaders, category, limit = 20, offset = 0, index = 'relevance' }) {
       const facets = [[`versions:${version}`], loaders.map(l => `categories:${l}`), ['project_type:mod']]
       if (category) facets.push([`categories:${category}`])
-      const data = await getJson(`${API}/search?${q({ query, facets, index: 'relevance', limit: String(limit) })}`)
+      const data = await getJson(`${API}/search?${q({ query, facets, index, limit: String(Math.min(100, limit)), offset: String(offset) })}`)
       return (data?.hits || []).map(normalizeHit)
+    },
+
+    // Поиск ресурспаков и шейдеров (type: 'resourcepack' | 'shader'); categories — все метки проекта целиком
+    async searchProjects(type, { version, query = '', category, facets = [], limit = 100, offset = 0, index = 'downloads' }) {
+      const f = [[`project_type:${type}`], [`versions:${version}`], ...facets]
+      if (category) f.push([`categories:${category}`])
+      const data = await getJson(`${API}/search?${q({ query, facets: f, index, limit: String(Math.min(100, limit)), offset: String(offset) })}`)
+      return (data?.hits || []).map(h => ({ ...normalizeHit(h), allCategories: h.categories || [] }))
     },
 
     async projects(ids) {

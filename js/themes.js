@@ -4,6 +4,8 @@
 import { EXTRA_THEMES } from './themes-extra.js'
 import { MORE_THEMES } from './themes-more.js'
 import { PLUS_THEMES } from './themes-plus.js'
+import { MOD_THEMES } from './themes-mods.js'
+import { buildDictThemes } from './themes-dict.js'
 import { applyPins } from './pins.js'
 
 const CORE_THEMES = [
@@ -50,7 +52,20 @@ const CORE_THEMES = [
 ]
 
 // лучшие моды каждой темы идут первыми (js/pins.js)
-export const THEMES = applyPins([...CORE_THEMES, ...EXTRA_THEMES, ...MORE_THEMES, ...PLUS_THEMES])
+const HAND_MADE = [...CORE_THEMES, ...EXTRA_THEMES, ...MORE_THEMES, ...PLUS_THEMES]
+// сначала темы из словаря (с русскими названиями), потом «франшизы» — каждая со своим модом; повторы по основам слов отсекаются
+const FROM_DICT = buildDictThemes(HAND_MADE)
+const takenStems = new Set([...HAND_MADE, ...FROM_DICT].flatMap(t => t.stems.map(x => x.toLowerCase())))
+// Односложные названия — только достаточно редкие: «sound», «tips», «highlight» легко встретить в обычной фразе
+const PLAIN_WORDS = new Set(['highlight', 'transparent', 'species', 'cluttered', 'bountiful', 'carpet', 'crawl', 'spark', 'trek', 'tools', 'tips', 'sound', 'particle',
+  'particles', 'comforts', 'physics', 'explorations', 'explorify', 'promenade', 'hearths', 'icarus', 'blossom', 'winterly', 'cluttered', 'interactic', 'objects'])
+const SHORT_OK = new Set(['create', 'quark', 'lootr', 'jade', 'twigs', 'goety', 'ae2', 'rei', 'emi'])
+const distinctive = t => {
+  const w = t.stems.length === 1 && t.stems[0].startsWith('=') ? t.stems[0].slice(1) : null
+  return !w || SHORT_OK.has(w) || (w.length >= 7 && !PLAIN_WORDS.has(w))
+}
+const FROM_MODS = MOD_THEMES.filter(t => distinctive(t) && !t.stems.some(x => takenStems.has(x.toLowerCase())))
+export const THEMES = applyPins([...HAND_MADE, ...FROM_DICT, ...FROM_MODS])
 
 // «Ванилла+» на случай, когда в описании нет понятных тем
 export const VANILLA_PLUS = { id: 'vanilla', label: 'Ванилла+', color: '#7ee081', stems: [], categories: [], queries: ['vanilla', 'quality of life', 'structures'], pinned: ['terralith', 'yungs-better-dungeons', 'supplementaries', 'waystones'] }
@@ -68,10 +83,10 @@ export const BASE = {
   qol: {
     label: 'Удобства',
     color: '#ffcf4a',
-    fabric: ['modmenu', 'jei', 'emi', 'xaeros-minimap', 'xaeros-world-map', 'journeymap', 'appleskin', 'mouse-tweaks', 'jade', 'resourcify'],
-    quilt: ['modmenu', 'jei', 'emi', 'xaeros-minimap', 'xaeros-world-map', 'journeymap', 'appleskin', 'mouse-tweaks', 'jade', 'resourcify'],
-    forge: ['jei', 'emi', 'xaeros-minimap', 'xaeros-world-map', 'journeymap', 'appleskin', 'mouse-tweaks', 'jade', 'resourcify'],
-    neoforge: ['jei', 'emi', 'xaeros-minimap', 'xaeros-world-map', 'journeymap', 'appleskin', 'mouse-tweaks', 'jade', 'resourcify'],
+    fabric: ['modmenu', 'jei', 'emi', 'xaeros-minimap', 'xaeros-world-map', 'journeymap', 'appleskin', 'mouse-tweaks', 'inventory-profiles-next', 'jade', 'resourcify'],
+    quilt: ['modmenu', 'jei', 'emi', 'xaeros-minimap', 'xaeros-world-map', 'journeymap', 'appleskin', 'mouse-tweaks', 'inventory-profiles-next', 'jade', 'resourcify'],
+    forge: ['jei', 'emi', 'xaeros-minimap', 'xaeros-world-map', 'journeymap', 'appleskin', 'mouse-tweaks', 'inventory-profiles-next', 'jade', 'resourcify'],
+    neoforge: ['jei', 'emi', 'xaeros-minimap', 'xaeros-world-map', 'journeymap', 'appleskin', 'mouse-tweaks', 'inventory-profiles-next', 'jade', 'resourcify'],
   },
 }
 
@@ -106,4 +121,5 @@ export const GROUPS = [
 ]
 
 // сколько тематических модов (база и зависимости добавляются сверху)
-export const SIZES = { light: 8, normal: 20, big: 45 }
+// «Гигантская» — 300 тематических модов; ползунок позволяет любое число до 1000
+export const SIZES = { light: 8, normal: 20, big: 45, giant: 300 }

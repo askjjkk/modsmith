@@ -139,6 +139,8 @@ export function analyze(text) {
   })
 
   for (const id of excluded.keys()) themes.delete(id)
+  // «сервер», «с друзьями по сети» — понадобится голосовой чат
+  if (toks.some((tok, pos) => !neg.has(pos) && /^(сервер|server|мультиплеер|multiplayer)/.test(tok))) settings.voice = true
   return { themes: [...themes.values()], excluded: [...excluded.values()], references, intents, settings }
 }
 
@@ -199,8 +201,12 @@ export function detectLoader(text) {
 
 export function detectSize(text) {
   const t = normalize(text)
+  // «500 модов», «на 300 модов» — точное число (как ползунок)
+  const n = t.match(/(?:^|[^\d.])(\d{2,4})\s*(?:мод|mods)/)
+  if (n && +n[1] >= 5 && +n[1] <= 1000) return +n[1]
+  if (/(гигант|giant|мега|сотн\S* мод|куча модов|тысяч)/.test(t)) return 'giant'
   if (/(легк|мини|небольш|light|small)/.test(t)) return 'light'
-  if (/(огромн|больш(ая|ую|ой|ие) сборк|мега|много модов|huge|big|large)/.test(t)) return 'big'
+  if (/(огромн|больш(ая|ую|ой|ие) сборк|много модов|huge|big|large)/.test(t)) return 'big'
   return null
 }
 

@@ -14,7 +14,8 @@ export const CHUNK_EXTRAS = {
   fabric: ['c2me-fabric', 'noisium', 'scalablelux', 'badoptimizations', 'packet-fixer', 'particle-core'],
   quilt: ['c2me-fabric', 'noisium', 'scalablelux', 'badoptimizations', 'packet-fixer', 'particle-core'],
   forge: ['c2mef', 'radium', 'saturn', 'badoptimizations', 'packet-fixer', 'particle-core'],
-  neoforge: ['packet-fixer', 'particle-core'],
+  // Moonrise — система чанков с серверов Paper: быстрая генерация и прогрузка (вместо C2ME и ScalableLux, которые вешали мир)
+  neoforge: ['moonrise-opt', 'packet-fixer', 'particle-core'],
 }
 
 // Что из эталона НЕ берём (проверено на настоящих падениях, 24.10):

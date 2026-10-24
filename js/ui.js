@@ -5,9 +5,12 @@ import { THEMES } from './themes.js'
 import { addBlocked, allBlocked } from './broken.js'
 import { diagnose, ramFor } from './doctor.js'
 import { COMFORT_OPTIONS } from './comfort-options.js'
-import { buildPack } from './builder.js'
+import { buildPack, updatePack } from './builder.js'
+import { SIZES } from './themes.js'
+import { deleteProfile, loadProfiles, requirements, saveProfile, surprise } from './extras.js'
 import { LOADER_NAMES, buildIndex, modsZipBlob, mrpackBlob, serverZipBlob } from './mrpack.js'
-import { DEFAULT_SHADER, RESOURCE_PACKS, SHADERS, detectGraphics, graphicsConfigs, shaderFor } from './graphics.js'
+import { DEFAULT_SHADER, RESOURCE_PACKS, SHADERS, detectGraphics, graphicsConfigs, packCount, shaderCount, shaderFor } from './graphics.js'
+import { budgetOf } from './builder.js'
 import { startSky } from './bg.js'
 import { makeTextures } from './textures.js'
 import { startPet } from './pet.js'
@@ -110,15 +113,41 @@ function setSeg(id, value, flash = false) {
 }
 
 function initSegs() {
-  for (const id of ['loader', 'size']) {
-    $(`#${id}`).addEventListener('click', e => {
-      const b = e.target.closest('button')
-      if (b) setSeg(id, b.dataset.value)
-    })
-  }
+  $('#loader').addEventListener('click', e => {
+    const b = e.target.closest('button')
+    if (b) setSeg('loader', b.dataset.value)
+  })
+  $('#size').addEventListener('click', e => {
+    const b = e.target.closest('button')
+    if (b) setSize(b.dataset.value)
+  })
+  $('#mod-count').addEventListener('input', e => setSize(Number(e.target.value)))
   setSeg('loader', state.loader)
-  setSeg('size', state.size)
-  addEventListener('resize', () => { setSeg('loader', state.loader); setSeg('size', state.size) })
+  setSize(state.size)
+  addEventListener('resize', () => { setSeg('loader', state.loader); setSize(state.size) })
+}
+
+// Размер: пресет («Большая») или точное число с ползунка. Ползунок и кнопки всегда показывают одно и то же
+function setSize(value, flash = false) {
+  const n = typeof value === 'number' ? value : Number(value) > 0 ? Number(value) : SIZES[value] || SIZES.normal
+  const preset = Object.keys(SIZES).find(k => SIZES[k] === n)
+  const seg = $('#size')
+  if (preset) {
+    setSeg('size', preset, flash)
+    seg.classList.remove('custom')
+  } else {
+    seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-checked', 'false'))
+    seg.classList.add('custom')
+  }
+  state.size = preset || n
+  if (typeof syncRpCount === 'function' && $('#rp-count')) syncRpCount()
+  $('#mod-count').value = String(n)
+  $('#mod-count-out').textContent = String(n)
+  const hint = $('#mod-count-hint')
+  hint.textContent = n > 400 ? 'огромная сборка: соберётся за 10–20 минут, запуск проверен выборочно — есть риск, что что-то не заработает'
+    : n >= 150 ? 'большая сборка: соберётся за 5–10 минут'
+      : 'плюс оптимизация, удобства и библиотеки'
+  hint.classList.toggle('warn', n > 400)
 }
 
 async function loadVersions() {
@@ -243,6 +272,8 @@ const THEME_GROUPS = [
 let pickerGroup = 'all'
 
 function themeGroupOf(t) {
+  if (t.id.startsWith('mod:')) return 'mods'
+  if (t.id.startsWith('q:')) return 'words'
   const cat = (t.categories || []).find(c => THEME_GROUPS.some(([id]) => id === c))
   return cat || 'other'
 }
@@ -250,7 +281,7 @@ function themeGroupOf(t) {
 function initThemePicker() {
   const panel = $('#theme-picker')
   const tabs = $('#picker-tabs')
-  for (const [id, label] of [['all', 'Все'], ['chosen', 'Выбранные'], ...THEME_GROUPS, ['other', 'Другое']]) {
+  for (const [id, label] of [['all', 'Все'], ['chosen', 'Выбранные'], ...THEME_GROUPS, ['mods', 'Моды по названию'], ['words', 'Звери, предметы, места'], ['other', 'Другое']]) {
     if (!['all', 'chosen', 'other'].includes(id) && !THEMES.some(t => themeGroupOf(t) === id)) continue
     const b = document.createElement('button')
     b.type = 'button'
@@ -323,7 +354,7 @@ function onInput() {
     renderChips()
     if (p.version) setVersion(p.version, true)
     if (p.loader && p.loader !== state.loader) setSeg('loader', p.loader, true)
-    if (p.size && p.size !== state.size) setSeg('size', p.size, true)
+    if (p.size && p.size !== state.size) setSize(p.size, true)
     // «для слабого пк», «только оптимизация» включают оптимизацию
     if (p.settings?.perf && !$('#perf').checked) { $('#perf').checked = true }
     if (p.settings?.qol && !$('#qol').checked) { $('#qol').checked = true }
@@ -337,34 +368,41 @@ function onInput() {
 
 // ---------- графика ----------
 let manualShader = false
+let rpManual = false // игрок сам выставил число ресурспаков — больше не следуем за размером
 function graphicsChoice() {
+  const budget = budgetOf(state.size)
+  const g = detectGraphics($('#prompt').value)
   return {
     shader: $('#shaders').checked ? $('#shader-pick').value : null,
-    packs: $('#rpacks').checked ? [...document.querySelectorAll('#rp-list input:checked')].map(i => i.value) : [],
+    shaders: shaderCount(budget),
+    packs: $('#rpacks').checked ? Number($('#rp-count').value) : 0,
+    // лучшее из лучшего ставим первыми
+    pinned: RESOURCE_PACKS.filter(r => r.on).map(r => r.slug),
+    power: g.power,
   }
+}
+
+function syncRpCount() {
+  if (!rpManual) {
+    const n = packCount(budgetOf(state.size))
+    $('#rp-count').value = String(n)
+  }
+  $('#rp-count-out').textContent = $('#rp-count').value
+  $('#rp-auto').classList.toggle('on', !rpManual)
 }
 
 function syncGfx() {
   $('#shader-pick').closest('.select').classList.toggle('dim', !$('#shaders').checked)
   $('#rp-list').classList.toggle('dim', !$('#rpacks').checked)
+  syncRpCount()
 }
 
 function initGfx() {
   const sel = $('#shader-pick')
   for (const sh of SHADERS) sel.append(new Option(sh.label, sh.slug, false, sh.slug === DEFAULT_SHADER))
   sel.addEventListener('change', () => { manualShader = true; if (!$('#shaders').checked) { $('#shaders').checked = true; syncGfx() } })
-  const list = $('#rp-list')
-  for (const rp of RESOURCE_PACKS) {
-    const label = document.createElement('label')
-    label.className = 'rp'
-    const box = document.createElement('input')
-    box.type = 'checkbox'
-    box.value = rp.slug
-    box.checked = rp.on
-    box.addEventListener('change', () => { if (box.checked && !$('#rpacks').checked) { $('#rpacks').checked = true; syncGfx() } })
-    label.append(box, rp.label)
-    list.append(label)
-  }
+  $('#rp-count').addEventListener('input', () => { rpManual = true; if (!$('#rpacks').checked) $('#rpacks').checked = true; syncGfx() })
+  $('#rp-auto').addEventListener('click', () => { rpManual = false; syncGfx() })
   $('#shaders').addEventListener('change', syncGfx)
   $('#rpacks').addEventListener('change', syncGfx)
   syncGfx()
@@ -392,14 +430,16 @@ function setStatus(text) {
   el.classList.remove('swap'); void el.offsetWidth; el.classList.add('swap')
 }
 
-async function craft() {
+async function craft(custom = null) {
   if (state.building) return
-  const text = $('#prompt').value.trim()
+  const text = custom?.text || $('#prompt').value.trim()
   if (!text) {
     toast('Опиши сборку хотя бы парой слов: например «магия и драконы».')
     $('#prompt').focus()
     return
   }
+  // список версий ещё грузится — в запрос ушло бы «Загружаю…» вместо версии игры
+  if (!/^\d/.test($('#version').value)) { toast('Список версий ещё загружается, подожди секунду и нажми ещё раз.'); return }
   state.building = true
   const btn = $('#craft')
   btn.disabled = true
@@ -433,16 +473,17 @@ async function craft() {
     }
   }
 
-  lastParse = parse(text)
-  const { themes, excluded } = effective()
+  if (!custom) lastParse = parse(text)
+  const { themes, excluded } = custom ? { themes: [], excluded: [] } : effective()
   const opts = {
     version: $('#version').value, loader: state.loader, size: state.size,
     perf: $('#perf').checked, qol: $('#qol').checked, polish: $('#polish').checked, themes, excluded, blocked: allBlocked(),
     onlyBase: !!lastParse.settings?.onlyBase && !manual.size,
     graphics: graphicsChoice(),
+    voice: !!lastParse.settings?.voice,
   }
   try {
-    const pack = await buildPack(opts, api, emit)
+    const pack = custom ? await custom.run(opts, emit) : await buildPack(opts, api, emit)
     pack.name = `Modsmith: ${text.slice(0, 48)}`
     pack.text = text
     if (!pack.mods.length) {
@@ -452,7 +493,7 @@ async function craft() {
     }
     $('#result-slot').classList.add('ready')
     setStatus(`Готово: ${pack.mods.length} модов`)
-    history.replaceState(null, '', `#${shareParams(opts, text)}`)
+    if (!custom) history.replaceState(null, '', `#${shareParams(opts, text)}`)
     await new Promise(r => setTimeout(r, reduceMotion ? 0 : 900))
     showResult(pack)
   } catch (e) {
@@ -519,6 +560,14 @@ function renderStats() {
   v.append(b, span)
   box.append(v)
   renderDockInfo()
+  renderRequirements()
+}
+
+function renderRequirements() {
+  const pack = enabledPack()
+  const shaders = pack.extras.filter(e => e.kind === 'shader').length
+  const packs = pack.extras.filter(e => e.kind === 'resourcepack').length
+  $('#req').textContent = `Для этой сборки: ${requirements({ modCount: pack.mods.length, shaders, packs, version: pack.version }).text}`
 }
 
 function card(mod, index) {
@@ -646,7 +695,7 @@ function showResult(pack) {
   const order = []
   for (const m of pack.mods) if (!order.some(s => s.id === m.section.id)) order.push(m.section)
   // сначала то, что просили (темы), потом база (оптимизация, удобства, атмосфера), библиотеки — в самом конце
-  const rank = s => (s.id === 'deps' ? 2 : ['perf', 'qol', 'polish', 'gfx'].includes(s.id) ? 1 : 0)
+  const rank = s => (s.id === 'deps' ? 3 : ['perf', 'qol', 'polish', 'gfx'].includes(s.id) ? 2 : s.id.startsWith('more-') ? 1 : 0)
   order.sort((a, b) => rank(a) - rank(b))
   const box = $('#sections')
   box.textContent = ''
@@ -933,7 +982,7 @@ async function applyDoctor() {
 function shareParams(opts, text) {
   const g = opts.graphics || {}
   return new URLSearchParams({ q: text, v: opts.version, l: opts.loader, s: opts.size, p: opts.perf ? '1' : '0', u: opts.qol ? '1' : '0', a: opts.polish ? '1' : '0',
-    sh: g.shader || '', rp: (g.packs || []).join(',') }).toString()
+    sh: g.shader || '', rp: String(g.packs ?? 0) }).toString()
 }
 
 async function share() {
@@ -950,15 +999,14 @@ function restoreFromHash() {
   $('#prompt').value = h.get('q')
   if (h.get('v')) setVersion(h.get('v'))
   if (h.get('l')) setSeg('loader', h.get('l'))
-  if (h.get('s')) setSeg('size', h.get('s'))
+  if (h.get('s')) setSize(h.get('s'))
   $('#perf').checked = h.get('p') !== '0'
   $('#qol').checked = h.get('u') !== '0'
   $('#polish').checked = h.get('a') !== '0'
   if (h.get('sh')) { $('#shaders').checked = true; $('#shader-pick').value = h.get('sh'); manualShader = true }
-  if (h.get('rp')) {
-    $('#rpacks').checked = true
-    const on = new Set(h.get('rp').split(','))
-    document.querySelectorAll('#rp-list input').forEach(i => { i.checked = on.has(i.value) })
+  if (h.get('rp') !== null && /^\d+$/.test(h.get('rp'))) {
+    $('#rpacks').checked = Number(h.get('rp')) > 0
+    if (Number(h.get('rp')) > 0) { $('#rp-count').value = h.get('rp'); rpManual = true }
   }
   syncGfx()
   $('.typer').classList.add('hidden')
@@ -995,6 +1043,80 @@ function renderDockInfo() {
   b.textContent = String(mods.length)
   info.append(b, ` модов · ${Math.round(mb)} МБ`)
   updateDock()
+}
+
+// ---------- «Удиви меня», «Обновить сборку», «Мои сборки» ----------
+function doSurprise() {
+  if (state.building) return
+  const r = surprise()
+  $('#prompt').value = r.text
+  $('.typer').classList.add('hidden')
+  setSize(r.size, true)
+  manual.clear()
+  onInput()
+  // темы берём прямо из жребия: так сработает ровно то, что выпало
+  setTimeout(() => { for (const id of r.themes) manual.set(id, 'in'); renderChips(); toast(`Выпало: ${r.themes.map(i => THEME_BY_ID.get(i)?.label).filter(Boolean).join(', ')}`) }, 250)
+}
+
+async function doUpdate(file) {
+  if (!file || state.building) return
+  try {
+    const zip = await window.JSZip.loadAsync(file)
+    const entry = zip.file('modrinth.index.json')
+    if (!entry) { toast('Это не .mrpack: внутри нет modrinth.index.json. Для CurseForge и TLauncher архивов обновление пока не работает.', true); return }
+    const index = JSON.parse(await entry.async('string'))
+    const version = $('#version').value
+    const text = `Обновление «${index.name || file.name}» на ${version} ${LOADER_NAMES[state.loader]}`
+    await craft({ text, run: (opts, emit) => updatePack(index, { version, loader: state.loader, blocked: allBlocked() }, api, emit) })
+  } catch (e) {
+    console.error(e)
+    toast('Не получилось прочитать файл сборки. Нужен .mrpack, скачанный с Modrinth или с этого сайта.', true)
+  }
+}
+
+function renderProfiles() {
+  const list = loadProfiles()
+  const box = $('#profiles')
+  box.hidden = !list.length
+  $('#profiles-count').textContent = String(list.length)
+  const out = $('#profiles-list')
+  out.textContent = ''
+  for (const p of list) {
+    const row = document.createElement('div')
+    row.className = 'profile'
+    const name = document.createElement('div')
+    name.className = 'profile-name'
+    const b = document.createElement('b')
+    b.textContent = p.name
+    const small = document.createElement('small')
+    small.textContent = `${p.version} ${LOADER_NAMES[p.loader] || p.loader} · ${p.mods} модов · ${new Date(p.date).toLocaleDateString('ru-RU')}`
+    name.append(b, small)
+    const open = document.createElement('button')
+    open.type = 'button'
+    open.textContent = 'Открыть'
+    open.addEventListener('click', () => {
+      history.replaceState(null, '', `#${p.hash}`)
+      restoreFromHash()
+      setTimeout(() => craft(), 300)
+    })
+    const del = document.createElement('button')
+    del.type = 'button'
+    del.className = 'del'
+    del.textContent = '×'
+    del.setAttribute('aria-label', 'Удалить сохранённую сборку')
+    del.addEventListener('click', () => { deleteProfile(p.hash); renderProfiles() })
+    row.append(name, open, del)
+    out.append(row)
+  }
+}
+
+function saveCurrent() {
+  const pack = state.pack
+  const hash = location.hash.slice(1)
+  if (!pack || !hash) { toast('Сборку, собранную через «Обновить», сохранить нельзя: у неё нет описания. Скачайте файл.'); return }
+  saveProfile({ name: pack.text.slice(0, 60), hash, version: pack.version, loader: pack.loader, mods: pack.mods.length })
+  renderProfiles()
+  toast('Сохранил. Сборка появится в списке «Мои сборки» под кнопкой «Скрафтить».')
 }
 
 // ---------- подсказки в стиле сайта ----------
@@ -1059,7 +1181,7 @@ async function main() {
   })
   $('#prompt').addEventListener('input', onInput)
   $('#prompt').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) craft() })
-  $('#craft').addEventListener('click', craft)
+  $('#craft').addEventListener('click', () => craft())
   $('#diagnose').addEventListener('click', runDoctor)
   $('#crash-file').addEventListener('change', e => readLogFiles(e.target.files))
   $('#doctor-example').addEventListener('click', showExample)
@@ -1074,6 +1196,11 @@ async function main() {
   $('#dl-mrpack').addEventListener('click', downloadMrpack)
   $('#dl-zip').addEventListener('click', downloadZip)
   $('#dl-server').addEventListener('click', downloadServer)
+  $('#surprise').addEventListener('click', doSurprise)
+  $('#update-btn').addEventListener('click', () => $('#update-file').click())
+  $('#update-file').addEventListener('change', e => { doUpdate(e.target.files[0]); e.target.value = '' })
+  $('#save-profile').addEventListener('click', saveCurrent)
+  renderProfiles()
   $('#share').addEventListener('click', share)
   await loadVersions()
   if (restoreFromHash()) setTimeout(craft, 900)
