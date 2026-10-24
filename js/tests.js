@@ -408,19 +408,31 @@ test('вложенные библиотеки и отрицание до пре�
 test('размер: пресеты, число с ползунка, «гигантская», «500 модов»', () => {
   eq(budgetOf('giant'), 300)
   eq(budgetOf('big'), 45)
-  eq(budgetOf(750), 750)
+  eq(budgetOf('max'), 500)
+  eq(budgetOf(750), 500) // выше 500 не идём
   eq(parse('гигантская сборка').size, 'giant')
   eq(parse('сервер на 500 модов').size, 500)
+  eq(parse('сервер на 900 модов').size, 500) // выше 500 не идём
+  eq(parse('максимальная сборка с магией').size, 'max')
   eq(parse('мини-карта и магия').size, 'light')
+})
+test('запрет Create на NeoForge 1.21.1 действует только в огромных сборках', () => {
+  const b = new PackBuilder({}, { version: '1.21.1', loader: 'neoforge' })
+  eq(b.banOf('create'), null)
+  b.budget = 300
+  eq(b.banOf('create'), null)
+  b.budget = 500
+  eq(typeof b.banOf('create'), 'string')
+  eq(new PackBuilder({}, { version: '1.20.1', loader: 'forge' }).banOf('create'), null)
 })
 test('«сервер» в запросе включает голосовой чат, «без сервера» — нет', () => {
   eq(!!parse('магия на сервере с друзьями').settings.voice, true)
   eq(!!parse('магия без сервера').settings.voice, false)
 })
 test('число ресурспаков растёт с размером до 100, шейдеров — до 10', () => {
-  eq([packCount(8), packCount(20), packCount(45), packCount(300), packCount(1000)], [3, 8, 20, 40, 100])
+  eq([packCount(8), packCount(20), packCount(45), packCount(300), packCount(500)], [3, 8, 20, 40, 100])
   eq(packCount(2000), 100)
-  eq([shaderCount(8), shaderCount(45), shaderCount(300), shaderCount(1000)], [1, 2, 4, 10])
+  eq([shaderCount(8), shaderCount(45), shaderCount(300), shaderCount(500)], [1, 2, 4, 10])
 })
 test('требования к ПК: растут с числом модов и шейдерами', () => {
   const a = requirements({ modCount: 50 }), b = requirements({ modCount: 500, shaders: 4, packs: 60 })

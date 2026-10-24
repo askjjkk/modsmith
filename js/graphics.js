@@ -27,7 +27,7 @@ export const RESOURCE_PACKS = [
 
 // Сколько ресурспаков брать под размер сборки (число модов по темам): плавно от 3 до 100
 export function packCount(budget) {
-  const points = [[0, 3], [8, 3], [20, 8], [45, 20], [300, 40], [1000, 100]]
+  const points = [[0, 3], [8, 3], [20, 8], [45, 20], [300, 40], [500, 100]]
   for (let i = 1; i < points.length; i++) {
     const [x1, y1] = points[i - 1], [x2, y2] = points[i]
     if (budget <= x2) return Math.round(y1 + (y2 - y1) * ((budget - x1) / (x2 - x1)))
@@ -37,7 +37,7 @@ export function packCount(budget) {
 
 // Сколько шейдеров положить в папку shaderpacks (включён будет один — выбранный)
 export function shaderCount(budget) {
-  return budget <= 20 ? 1 : budget <= 45 ? 2 : budget <= 300 ? 4 : budget < 600 ? 6 : 10
+  return budget <= 20 ? 1 : budget <= 45 ? 2 : budget <= 300 ? 4 : budget < 500 ? 6 : 10
 }
 
 const has = (toks, stems) => toks.some(t => stems.some(s => t.startsWith(s)))

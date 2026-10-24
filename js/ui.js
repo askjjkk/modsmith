@@ -129,7 +129,7 @@ function initSegs() {
 
 // Размер: пресет («Большая») или точное число с ползунка. Ползунок и кнопки всегда показывают одно и то же
 function setSize(value, flash = false) {
-  const n = typeof value === 'number' ? value : Number(value) > 0 ? Number(value) : SIZES[value] || SIZES.normal
+  const n = Math.min(SIZES.max, typeof value === 'number' ? value : Number(value) > 0 ? Number(value) : SIZES[value] || SIZES.normal)
   const preset = Object.keys(SIZES).find(k => SIZES[k] === n)
   const seg = $('#size')
   if (preset) {
@@ -144,7 +144,7 @@ function setSize(value, flash = false) {
   $('#mod-count').value = String(n)
   $('#mod-count-out').textContent = String(n)
   const hint = $('#mod-count-hint')
-  hint.textContent = n > 400 ? 'огромная сборка: соберётся за 5–15 минут. Мы проверяли запуском сборки до ~340 серверных модов; выше — большой риск, что игра не запустится. Если упадёт, закиньте latest.log в «Доктор»'
+  hint.textContent = n > 400 ? 'огромная сборка: соберётся за 5–15 минут. Запуском проверяли до 500 модов на NeoForge и Fabric 1.21.1; на других версиях и загрузчиках риск выше. Если упадёт, закиньте latest.log в «Доктор»'
     : n >= 150 ? 'большая сборка: соберётся за 5–10 минут'
       : 'плюс оптимизация, удобства и библиотеки'
   hint.classList.toggle('warn', n > 400)

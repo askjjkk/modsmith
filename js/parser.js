@@ -204,8 +204,9 @@ export function detectSize(text) {
   const t = normalize(text)
   // «500 модов», «на 300 модов» — точное число (как ползунок)
   const n = t.match(/(?:^|[^\d.])(\d{2,4})\s*(?:мод|mods)/)
-  if (n && +n[1] >= 5 && +n[1] <= 1000) return +n[1]
-  if (/(гигант|giant|мега|сотн\S* мод|куча модов|тысяч)/.test(t)) return 'giant'
+  if (n && +n[1] >= 5) return Math.min(+n[1], 500) // выше 500 запуск не проверяли
+  if (/(максимальн\S* сборк|максимум мод|максимум сборк|как можно больше мод|тысяч)/.test(t)) return 'max'
+  if (/(гигант|giant|мега|сотн\S* мод|куча модов)/.test(t)) return 'giant'
   if (/(легк|мини|небольш|light|small)/.test(t)) return 'light'
   if (/(огромн|больш(ая|ую|ой|ие) сборк|много модов|huge|big|large)/.test(t)) return 'big'
   return null

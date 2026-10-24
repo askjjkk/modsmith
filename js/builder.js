@@ -4,7 +4,7 @@ import { KNOWN_SLUGS, isPlatform, norm, readJarMeta } from './jarmeta.js'
 import { CHUNK_EXTRAS, loadRefPack } from './refpack.js'
 import { cmpVer, rangeFits, wrongMcInFilename } from './versions.js'
 import { SHADER_MOD, addGraphics } from './graphics.js'
-import { CLIENT_ONLY } from './broken.js'
+import { BIG_FROM, BIG_ONLY, CLIENT_ONLY } from './broken.js'
 
 export const loaderList = loader => (loader === 'quilt' ? ['quilt', 'fabric'] : [loader])
 
@@ -212,7 +212,8 @@ export class PackBuilder {
 
   // запрет на мод: общий, для загрузчика («slug@forge») или для загрузчика и версии игры («slug@fabric@1.21.1»)
   banOf(slug) {
-    return this.blocked[slug] || this.blocked[`${slug}@${this.loader}`] || this.blocked[`${slug}@${this.loader}@${this.version}`] || null
+    const big = this.budget > BIG_FROM ? BIG_ONLY[`${slug}@${this.loader}@${this.version}`] || BIG_ONLY[`${slug}@${this.loader}`] : null
+    return this.blocked[slug] || this.blocked[`${slug}@${this.loader}`] || this.blocked[`${slug}@${this.loader}@${this.version}`] || big || null
   }
 
   async versionFor(projectId, { noAlpha = false } = {}) {
@@ -678,7 +679,7 @@ export class PackBuilder {
 }
 
 // сколько тематических модов: пресет («big») или число с ползунка
-export const budgetOf = size => (typeof size === 'number' ? size : Number(size) > 0 ? Number(size) : SIZES[size] || SIZES.normal)
+export const budgetOf = size => Math.min(SIZES.max, typeof size === 'number' ? size : Number(size) > 0 ? Number(size) : SIZES[size] || SIZES.normal)
 
 // Категории Modrinth для добора больших сборок, от самых «безопасных» к узким
 const FILL_CATEGORIES = [['adventure', 'Приключения'], ['decoration', 'Декор и стройка'], ['worldgen', 'Мир и постройки'],
@@ -841,6 +842,7 @@ export async function buildPack(opts, api, emit = () => {}) {
   const asked = opts.graphics?.shader ? opts.themes.filter(t => !['shaders', 'graphics'].includes(t.theme.id)) : opts.themes
   const themes = opts.onlyBase ? [] : asked.length ? asked : [{ theme: VANILLA_PLUS, word: null }]
   const budget = budgetOf(opts.size)
+  b.budget = budget // от размера зависят запреты для огромных сборок
   const quota = Math.max(2, Math.ceil(budget / themes.length))
   progress(0.25, budget > 100 ? `Ищу моды по темам: нужно ${budget}, это займёт несколько минут…` : 'Ищу моды по темам…')
   const pools = await Promise.all(themes.map(t => b.candidates(t.theme, quota)))

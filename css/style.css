@@ -524,6 +524,7 @@ button.chip:hover { transform: translateY(-2px); filter: brightness(1.15); }
   .forge, .crafting, .summary { padding: 18px; border-radius: 18px; }
   .controls { grid-template-columns: 1fr; gap: 8px; }
   .control-label { margin-top: 6px; }
+  .seg { width: auto; } /* пять кнопок размера не помещаются в ряд — переносим на вторую строку */
   .seg button { padding: 8px 11px; font-size: 14px; }
   #prompt, .typer { font-size: 17px; }
   .grid { grid-template-columns: repeat(3, 48px); }
