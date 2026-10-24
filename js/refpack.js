@@ -14,19 +14,19 @@ export const CHUNK_EXTRAS = {
   fabric: ['c2me-fabric', 'noisium', 'scalablelux', 'badoptimizations', 'packet-fixer', 'particle-core'],
   quilt: ['c2me-fabric', 'noisium', 'scalablelux', 'badoptimizations', 'packet-fixer', 'particle-core'],
   forge: ['c2mef', 'radium', 'saturn', 'badoptimizations', 'packet-fixer', 'particle-core'],
-  // Moonrise — система чанков с серверов Paper: быстрая генерация и прогрузка (вместо C2ME и ScalableLux, которые вешали мир)
-  neoforge: ['moonrise-opt', 'packet-fixer', 'particle-core'],
+  // Moonrise проверен и НЕ подходит: ломает запуск вместе с Forgified Fabric API (ChunkHolderMixin) — см. js/broken.js
+  neoforge: ['packet-fixer', 'particle-core'],
 }
 
 // Что из эталона НЕ берём (проверено на настоящих падениях, 24.10):
-// C2ME для NeoForge — альфа, с ScalableLux мир висит на 0%; Saturn спорит с ModernFix и Lithium;
+// C2ME для NeoForge и Forge — только альфа, с ScalableLux мир висит на 0% (на Forge замер выигрыша не показал); Saturn спорит с ModernFix и Lithium;
 // Log Begone прячет ошибки из лога — без них не найти виновника падения
 export const REF_SKIP = {
   fabric: /^log-begone/,
   quilt: /^(log-begone|fabric-api)$/,
   // Chunky — прогрузка мира заранее на сервере, в сборке игрока не нужен; с Distant Horizons роняет создание мира
   forge: /^(log-begone|chunky)$/,
-  neoforge: /^(c2me|scalablelux|saturn|log-begone|chunky)/,
+  neoforge: /^(c2me|saturn|log-begone|chunky)/, // ScalableLux возвращён: без C2ME он безопасен (замер: мир создаётся, разницы по скорости нет)
 }
 
 // Конфиги, которые не нужны или вредны в чужой сборке

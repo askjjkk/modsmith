@@ -165,6 +165,10 @@ export function examineLog(text) {
     const dup = [m[1], m[2]].filter(x => x.toLowerCase() !== 'mixinextras')
     add(dup.join(' и '), `оба несут внутри одну и ту же библиотеку (${m[3]})`, `Удалите ${dup[0]} или обновите его.`, { ids: dup })
   }
+  // датапак внутри мода сломал мир: «Failed to parse minecraft:worldgen/noise_settings/caves.json from pack mr_caves__canyons»
+  for (const m of text.matchAll(/Failed to (?:parse|load) [^\n]*? from pack (?:mr_|file\/)?([A-Za-z0-9_\-.]+)/g)) {
+    add(m[1], 'его данные мира не подходят этой версии игры (датапак внутри мода)')
+  }
   for (const m of text.matchAll(/Mixin \[([\w.-]+?)\.mixins\.json:[^\]]*\][^\n]*?FAILED/g)) {
     const mod = m[1].split(/[-.]/)[0]
     add(mod, 'не смог встроиться в игру: эту же часть игры уже меняет другой мод (часто — мод оптимизации)',

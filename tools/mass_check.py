@@ -153,8 +153,12 @@ def prepare_server(work_root: Path, mc: str, deps: dict, cache: dict) -> tuple:
 
 
 def thread_dump(pid: int) -> str:
-    return subprocess.run([str(Path(JAVA).with_name("jcmd.exe")), str(pid), "Thread.print"], capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=60).stdout
+    # у сильно нагруженного сервера jcmd бывает не отвечает: тогда просто нет снимка, проверка не падает
+    try:
+        return subprocess.run([str(Path(JAVA).with_name("jcmd.exe")), str(pid), "Thread.print"], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=60).stdout
+    except subprocess.TimeoutExpired:
+        return ""
 
 
 def server_idle(dump: str) -> bool:
@@ -221,8 +225,11 @@ def run_server(work: Path, args: list) -> str:
                     pass
                 break
             # только настоящий заголовок отчёта: в списке модов Quilt есть «Quilted Fabric Crash Report Info»
+            if "dtt_agent" in line or "NativeBootstrap" in line:
+                lines.append("MODSMITH-NATIVE: мод загружает нативный агент (DLL) — такие моды в проверке не запускаем")
+                break
             if "Could not execute entrypoint" in line or "Incompatible mods found" in line or "---- Minecraft Crash Report" in line \
-                    or "Mixin apply failed" in line or "MixinApplyError" in line:
+                    or "Mixin apply failed" in line or "MixinApplyError" in line or "Critical injection failure" in line                     or "Mixin transformation of" in line or "MixinTransformerError" in line or "FormattedException" in line:
                 end = time.time() + 15
                 while time.time() < end:
                     try:
@@ -251,6 +258,10 @@ def culprits(log: str, by_id: dict, files_by_name: dict = None) -> dict:
 
     def add(mod_id, why):
         f = by_id.get(norm(mod_id))
+        if not f and len(mod_id) >= 5:
+            # мод вложен в сборник (jarjar) и его id нет среди id jar: ищем jar по имени файла
+            low = mod_id.lower().replace("_", "-")
+            f = next((name for name in files_by_name if low in name.lower().replace("_", "-")), None)
         if f and norm(mod_id) not in PLATFORM and f not in found:
             found[f] = why
 
@@ -268,6 +279,9 @@ def culprits(log: str, by_id: dict, files_by_name: dict = None) -> dict:
     for m in re.finditer(r"Mixin \[([\w.-]+?)\.mixins\.json:[^\]]*\][^\n]*?FAILED", log):
         cfg = m.group(1)
         add(re.split(r"[-.]", cfg)[0], "не смог встроиться в игру: эту часть уже меняет другой мод")
+    # «Failed to parse minecraft:worldgen/…json from pack mr_caves__canyons» — датапак внутри мода сломал мир
+    for m in re.finditer(r"Failed to (?:parse|load) [^\n]*? from pack (?:mr_|file/)?([A-Za-z0-9_\-.]+)", log):
+        add(m.group(1), "его данные мира не подходят этой версии игры")
     # Forge: два мода несут одну и ту же библиотеку внутри себя
     for m in re.finditer(r"Modules (\S+) and (\S+) export package", log):
         for mod in (m.group(1), m.group(2)):

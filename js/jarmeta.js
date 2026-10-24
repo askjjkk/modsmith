@@ -155,10 +155,13 @@ export async function readJarMeta(url, size, fetchImpl = (...a) => fetch(...a), 
 
     const entries = new Map()
     const nested = []
+    let nativeAgent = false
     const dec = new TextDecoder()
     for (let p = 0; p + 46 <= cd.length && u32(cd, p) === 0x02014b50;) {
       const nameLen = u16(cd, p + 28), extraLen = u16(cd, p + 30), commentLen = u16(cd, p + 32)
       const name = dec.decode(cd.subarray(p + 46, p + 46 + nameLen))
+      // нативный агент для Java (JVMTI) внутри мода: подгружает DLL в игру — такое в сборки не берём
+      if (/jvmti|dtt_agent|runtime-agent.*\.jar$/i.test(name)) nativeAgent = true
       if (WANTED.includes(name)) {
         entries.set(name, { method: u16(cd, p + 10), comp: u32(cd, p + 20), offset: u32(cd, p + 42), nameLen })
       } else if (/^META-INF\/(jars|jarjar)\/.+\.jar$/i.test(name)) {
@@ -180,6 +183,7 @@ export async function readJarMeta(url, size, fetchImpl = (...a) => fetch(...a), 
     const meta = file.endsWith('.toml') ? parseToml(text) : file === 'quilt.mod.json' ? parseQuilt(text) : parseFabric(text)
     meta.kind = KIND[file]
     meta.nested = [...new Set([...meta.nested, ...nested])]
+    meta.nativeAgent = nativeAgent
     // Forge 1.20 и старше перечисляет встраивания (mixin) в MANIFEST.MF
     if (file.endsWith('.toml') && entries.has('META-INF/MANIFEST.MF')) {
       const manifest = (await read('META-INF/MANIFEST.MF')).replace(/\r?\n /g, '') // длинные строки манифеста переносятся

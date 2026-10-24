@@ -94,6 +94,7 @@ export const missingBase = (project, chosen) => missingEcosystem(project, chosen
 // Зависимости, которые авторы забыли указать на Modrinth (найдено по настоящим падениям)
 export const EXTRA_DEPS = {
   'ancient-warfare-3-npcs': ['arlib'], // NoClassDefFoundError: ARLib/network/…
+  'create-aeronautics': ['sable'], // сборник с вложенными модами aeronautics/offroad/simulated: без Sable мод не загружается
 }
 
 // На Forge/NeoForge вместо Fabric API работает его порт (P7dR8mSH — Fabric API)
@@ -186,7 +187,6 @@ const OLD_NEO = mc => cmpVer(mc, '1.21.6') < 0
 
 // Пары, которые вместе не работают, хотя не все авторы это указали (по слагам, в обе стороны)
 const INCOMPATIBLE_SLUGS = {
-  'moonrise-opt': ['scalablelux', 'starlight', 'starlight-neoforge', 'c2me-neoforge', 'c2me-fabric', 'canary', 'not-enough-crashes'],
 }
 const slugsClash = (a, b) => INCOMPATIBLE_SLUGS[a]?.includes(b) || INCOMPATIBLE_SLUGS[b]?.includes(a)
 
@@ -207,6 +207,11 @@ export class PackBuilder {
     this.readMeta = readMeta
     this.metaCache = new Map()
     this.vetoed = new Set() // убранные моды обратно не добавляем
+  }
+
+  // запрет на мод: общий, для загрузчика («slug@forge») или для загрузчика и версии игры («slug@fabric@1.21.1»)
+  banOf(slug) {
+    return this.blocked[slug] || this.blocked[`${slug}@${this.loader}`] || this.blocked[`${slug}@${this.loader}@${this.version}`] || null
   }
 
   async versionFor(projectId, { noAlpha = false } = {}) {
@@ -246,7 +251,7 @@ export class PackBuilder {
       if (!pid || this.chosen.has(pid) || acc.has(pid)) continue
       const [project] = await this.api.projects([pid])
       if (!project) continue
-      const ban = this.blocked[project.slug] || this.blocked[`${project.slug}@${this.loader}`]
+      const ban = this.banOf(project.slug)
       if (ban) return `нужен «${project.title}», а он ${ban}`
       const v = await this.versionFor(pid)
       if (!v) return `нет зависимости «${project.title}» под ${this.version}`
@@ -272,7 +277,7 @@ export class PackBuilder {
     if (!allowLibrary && isLibrary(project)) return false
     const g = groupOf(project)
     if (g && this.groups.has(g)) return false
-    const ban = this.blocked[project.slug] || this.blocked[`${project.slug}@${this.loader}`]
+    const ban = this.banOf(project.slug)
     if (ban) {
       this.skipped.push({ title: project.title, why: ban })
       return false
@@ -539,6 +544,7 @@ export class PackBuilder {
   // Подходит ли файл мода к этой сборке. Возвращает причину или null.
   fileProblem(meta) {
     if (!meta) return null
+    if (meta.nativeAgent) return 'мод подгружает в Java нативный агент (DLL): в чужие сборки такое не берём'
     const forgeLike = ['forge', 'neoforge'].includes(this.loader)
     if (forgeLike && ['fabric', 'quilt'].includes(meta.kind)) return 'в файле версия только для Fabric'
     if (!forgeLike && ['forge', 'neoforge'].includes(meta.kind)) return 'в файле версия только для Forge/NeoForge'
