@@ -7,6 +7,7 @@
 """
 import hashlib
 import json
+import os
 import queue
 import re
 import shutil
@@ -89,7 +90,7 @@ SUCCESS = ("Done (", "MODSMITH-SILENT-OK")
 # Сколько молчания после «Preparing level» проверять снимком потоков (некоторые сборки не печатают «Done»)
 SILENCE = 60
 # Сколько ждать создания мира; дольше — считаем, что генерация зависла
-WORLD_TIMEOUT = 420
+WORLD_TIMEOUT = int(os.environ.get('MODSMITH_TIMEOUT', 420))  # для сборок на сотни модов ставят больше
 
 
 def started(log: str) -> bool:

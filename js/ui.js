@@ -144,7 +144,7 @@ function setSize(value, flash = false) {
   $('#mod-count').value = String(n)
   $('#mod-count-out').textContent = String(n)
   const hint = $('#mod-count-hint')
-  hint.textContent = n > 400 ? 'огромная сборка: соберётся за 10–20 минут, запуск проверен выборочно — есть риск, что что-то не заработает'
+  hint.textContent = n > 400 ? 'огромная сборка: соберётся за 5–15 минут. Мы проверяли запуском сборки до ~340 серверных модов; выше — большой риск, что игра не запустится. Если упадёт, закиньте latest.log в «Доктор»'
     : n >= 150 ? 'большая сборка: соберётся за 5–10 минут'
       : 'плюс оптимизация, удобства и библиотеки'
   hint.classList.toggle('warn', n > 400)
@@ -536,7 +536,7 @@ function renderStats() {
     [mods.length, '', 'модов'],
     [deps, '', 'из них зависимостей'],
     [Math.round(mb * 10) / 10, '', 'МБ скачать'],
-    [ramFor(mods.length), ' ГБ', 'памяти выделить игре'],
+    [requirements({ modCount: mods.length, shaders: (pack.extras || []).filter(e => e.kind === 'shader' && state.enabled.has(e.project.id)).length, packs: (pack.extras || []).filter(e => e.kind === 'resourcepack' && state.enabled.has(e.project.id)).length, version: pack.version }).gameRam, ' ГБ', 'памяти выделить игре'],
   ]
   const ok = verifiedSet(pack)
   const checked = mods.filter(m => ok.has(m.project.id)).length
