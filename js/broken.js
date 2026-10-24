@@ -16,6 +16,7 @@ export const BROKEN = {
 // Моды только для игры, хотя на Modrinth помечены и для сервера: на сервер их не ставим (проверено запуском)
 export const CLIENT_ONLY = {
   fog: 'на сервере падает: ему нужны классы игры (KeyMapping)',
+  fogoverrides: 'на сервере падает: ему нужен экран игры (Cloth Config GUI)',
 }
 
 const KEY = 'modsmith-blocked'

@@ -21,10 +21,10 @@ export const INTENTS = [
   { label: 'Надолго', stems: ['надолго', 'на долго', 'на месяц', 'на месяцы', 'много контента', 'long term', 'lots of content'], size: 'big', themes: ['progression', 'quests'] },
   { label: 'На вечер', stems: ['на вечер', 'на пару час', 'быстро пройти', 'короткая', 'short'], size: 'light' },
   // стиль игры
-  { label: 'Выживание', stems: ['выживан', 'на выжив', 'survival'], themes: ['hardcore'] },
+  { label: 'Выживание', stems: ['выживан', 'на выжив', 'survival'], themes: [] },
   { label: 'Строить', stems: ['строить', 'стройк', 'креатив', 'для строит', 'build', 'creative'], themes: ['building', 'furniture', 'blocks', 'decor'] },
   { label: 'Исследовать мир', stems: ['исследов', 'путешеств', 'бродить', 'гулять по миру', 'explore', 'travel'], themes: ['exploration', 'biomes', 'structures'] },
-  { label: 'Красиво', stems: ['красив', 'чтобы было красиво', 'графон', 'реалистичн граф', 'beautiful', 'pretty', 'graphics'], themes: ['shaders', 'graphics', 'particles', 'animations'] },
+  { label: 'Красиво', stems: ['=красиво', '=красивая', '=красивую', '=красивой', 'красивая графика', 'чтобы было красиво', 'графон', 'реалистичн граф', 'beautiful', 'pretty', 'graphics'], themes: ['shaders', 'graphics', 'particles', 'animations'] },
   { label: 'Атмосферно', stems: ['атмосфер', 'погружен', 'immersive', 'atmospheric'], themes: ['sound', 'weather', 'fog', 'animations'] },
   { label: 'Много боссов', stems: ['много босс', 'больше босс', 'боссы', 'many bosses', 'more bosses'], themes: ['bosses', 'epic'] },
   { label: 'Много данжей', stems: ['много данж', 'больше данж', 'подземель', 'many dungeons'], themes: ['dungeons', 'structures', 'loot'] },

@@ -7,7 +7,7 @@ export const EXTRA_THEMES = [
   // --- мир и исследование ---
   T('nether', 'Незер', '#e0533d', ['незер', '=ад', 'адск', 'nether', '=hell'], ['nether', 'nether expansion'], ['worldgen']),
   T('end', 'Энд', '#d6c6ff', ['энд', 'эндер', '=end', 'ender'], ['end expansion', 'end dimension'], ['worldgen']),
-  T('sky', 'Небесные острова', '#9fd6ff', ['небес', 'остров', 'облак', 'skyblock', 'sky island', 'floating'], ['sky islands', 'floating islands'], ['worldgen']),
+  T('sky', 'Небесные острова', '#9fd6ff', ['небес', 'облак', 'летающ остров', 'skyblock', 'sky island', 'floating'], ['sky islands', 'floating islands'], ['worldgen']),
   T('underwater', 'Подводный мир', '#1fb5c9', ['подвод', 'под водой', 'русал', '=кит', 'киты', 'underwater', 'mermaid', 'aquatic'], ['underwater', 'aquatic'], []),
   T('forest', 'Леса', '#3f9b4b', ['=лес', 'леса', 'лесн', 'деревья', 'деревьев', 'forest', 'tree'], ['forest', 'trees'], ['worldgen']),
   T('desert', 'Пустыни', '#e3c06b', ['пустын', 'песк', 'оазис', 'desert', 'dune'], ['desert'], ['worldgen']),

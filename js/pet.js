@@ -191,7 +191,8 @@ export function startPet({ reduceMotion = false } = {}) {
   let x = innerWidth * 0.75, y = 0, vy = 0, dir = -1
   let mode = 'walk', frame = 0, idle = 0, target = null, dragging = null, lastTick = performance.now(), frameTimer = 0
   let blinkUntil = 0, nextBlink = performance.now() + 2500, shake = 0, fallFrom = 0
-  const ground = () => innerHeight - H - 6 - (PETS[prefs.kind].flies ? 40 : 0)
+  // пол — низ экрана; если выехала панель скачивания, питомец стоит над ней
+  const ground = () => innerHeight - H - 6 - (PETS[prefs.kind].flies ? 40 : 0) - (document.querySelector('.dock.on') ? 76 : 0)
   y = ground()
 
   function setKind(kind) {
