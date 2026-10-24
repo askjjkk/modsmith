@@ -26,7 +26,7 @@ export const REF_SKIP = {
   quilt: /^(log-begone|fabric-api)$/,
   // Chunky — прогрузка мира заранее на сервере, в сборке игрока не нужен; с Distant Horizons роняет создание мира
   forge: /^(log-begone|chunky)$/,
-  neoforge: /^(c2me|saturn|log-begone|chunky)/, // ScalableLux возвращён: без C2ME он безопасен (замер: мир создаётся, разницы по скорости нет)
+  neoforge: /^(c2me|scalablelux|saturn|log-begone|chunky)/, // ScalableLux: замер скорости ничего не дал, а он несовместим с Sable (Create Aeronautics)
 }
 
 // Конфиги, которые не нужны или вредны в чужой сборке

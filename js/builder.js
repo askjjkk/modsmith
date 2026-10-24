@@ -187,6 +187,7 @@ const OLD_NEO = mc => cmpVer(mc, '1.21.6') < 0
 
 // Пары, которые вместе не работают, хотя не все авторы это указали (по слагам, в обе стороны)
 const INCOMPATIBLE_SLUGS = {
+  distanthorizons: ['chunky'], // Distant Horizons обращается к Chunky, которого «нет»: мир не создаётся (проверено запуском)
 }
 const slugsClash = (a, b) => INCOMPATIBLE_SLUGS[a]?.includes(b) || INCOMPATIBLE_SLUGS[b]?.includes(a)
 

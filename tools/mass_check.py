@@ -229,7 +229,7 @@ def run_server(work: Path, args: list) -> str:
                 lines.append("MODSMITH-NATIVE: мод загружает нативный агент (DLL) — такие моды в проверке не запускаем")
                 break
             if "Could not execute entrypoint" in line or "Incompatible mods found" in line or "---- Minecraft Crash Report" in line \
-                    or "Mixin apply failed" in line or "MixinApplyError" in line or "Critical injection failure" in line                     or "Mixin transformation of" in line or "MixinTransformerError" in line or "FormattedException" in line:
+                    or "Mixin apply failed" in line or "MixinApplyError" in line or "Critical injection failure" in line                     or "can't proceed with server load" in line or "Mixin transformation of" in line or "MixinTransformerError" in line or "FormattedException" in line:
                 end = time.time() + 15
                 while time.time() < end:
                     try:
@@ -280,7 +280,7 @@ def culprits(log: str, by_id: dict, files_by_name: dict = None) -> dict:
         cfg = m.group(1)
         add(re.split(r"[-.]", cfg)[0], "не смог встроиться в игру: эту часть уже меняет другой мод")
     # «Failed to parse minecraft:worldgen/…json from pack mr_caves__canyons» — датапак внутри мода сломал мир
-    for m in re.finditer(r"Failed to (?:parse|load) [^\n]*? from pack (?:mr_|file/)?([A-Za-z0-9_\-.]+)", log):
+    for m in re.finditer(r"Failed to (?:parse|load) [^\n]*? from pack (?:\w+/)?(?:mr_|file/)?([A-Za-z0-9_\-.]+)", log):
         add(m.group(1), "его данные мира не подходят этой версии игры")
     # Forge: два мода несут одну и ту же библиотеку внутри себя
     for m in re.finditer(r"Modules (\S+) and (\S+) export package", log):
@@ -305,7 +305,7 @@ def culprits(log: str, by_id: dict, files_by_name: dict = None) -> dict:
             # «файл не найден» — мод просто создаёт свои настройки, это не падение
             searching = not re.search(r"FileNotFoundException|NoSuchFileException", line)
             continue
-        frame = re.match(r"^\s*at (?:knot/{1,2})?([a-zA-Z_][\w.$<>]+)\(", line) if searching else None
+        frame = re.match(r"^\s*at (?:[^\s/()]*/)*([a-zA-Z_][\w.$<>]+)\(", line) if searching else None
         if not frame:
             continue
         # в latest.log у строки стека есть имя файла мода: «~[destroying-minecraft-1.0.0.jar:?]»

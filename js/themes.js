@@ -64,7 +64,8 @@ const distinctive = t => {
   const w = t.stems.length === 1 && t.stems[0].startsWith('=') ? t.stems[0].slice(1) : null
   return !w || SHORT_OK.has(w) || (w.length >= 7 && !PLAIN_WORDS.has(w))
 }
-const FROM_MODS = MOD_THEMES.filter(t => distinctive(t) && !t.stems.some(x => takenStems.has(x.toLowerCase())))
+// у мода убираем только основы, которые уже заняты другой темой («ae2»), а саму тему оставляем, пока есть хоть одно своё слово
+const FROM_MODS = MOD_THEMES.map(t => ({ ...t, stems: t.stems.filter(x => !takenStems.has(x.toLowerCase())) })).filter(t => t.stems.length && distinctive(t))
 export const THEMES = applyPins([...HAND_MADE, ...FROM_DICT, ...FROM_MODS])
 
 // «Ванилла+» на случай, когда в описании нет понятных тем

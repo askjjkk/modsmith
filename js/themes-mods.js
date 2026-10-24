@@ -426,6 +426,28 @@ const MODS = [
   ["cozy-home", "Lucky's Cozy Home: Refurnished"]
 ]
 
+// Обязательные «франшизы»: если их нет среди топа по скачиваниям, добавляем руками (и со всеми привычными названиями)
+const MUST = [
+  ['mekanism', 'Mekanism'], ['ae2', 'Applied Energistics 2'], ['irons-spells-n-spellbooks', "Iron's Spells 'n Spellbooks"],
+  ['ars-nouveau', 'Ars Nouveau'], ['l_enders-cataclysm', "L_Ender's Cataclysm"], ['botania', 'Botania'],
+  ['tinkers-construct', "Tinkers' Construct"], ['thermal-expansion', 'Thermal Expansion'], ['immersiveengineering', 'Immersive Engineering'],
+  ['ice-and-fire-dragons', 'Ice and Fire'], ['epic-fight', 'Epic Fight'], ['refined-storage', 'Refined Storage'], ['powah', 'Powah'],
+  ['pixelmon', 'Pixelmon'], ['mowzies-mobs', "Mowzie's Mobs"], ['bosses-of-mass-destruction', 'Bosses of Mass Destruction'],
+  ['the-twilight-forest-dungeons-villages', 'Twilight Forest'], ['tectonic', 'Tectonic'], ['curios', 'Curios'],
+]
+for (const row of MUST) if (!MODS.some(m => m[0] === row[0])) MODS.push(row)
+
+// другие названия, под которыми мод знают игроки
+const ALIASES = {
+  'l_enders-cataclysm': ['cataclysm', 'катаклизм'], 'irons-spells-n-spellbooks': ["iron's spells", 'irons spells', 'iron spells', 'iron spellbooks', 'айронс спеллс'],
+  ae2: ['applied energistics', 'ae2', 'эплайд энерджистикс'], 'ice-and-fire-dragons': ['ice and fire', 'айс энд фаер', 'ice & fire'],
+  'tinkers-construct': ["tinkers' construct", 'tinkers construct', 'tinkers', 'тинкерс'], 'ars-nouveau': ['ars nouveau', 'арс новеау', 'арс нуво'],
+  mekanism: ['mekanism', 'механизм мод'], create: ['create', 'создание мод'], 'alexs-mobs': ["alex's mobs", 'alexs mobs', 'alex mobs', 'алекс мобс'],
+  'alexs-caves': ["alex's caves", 'alexs caves', 'alex caves', 'алекс кавес'], cobblemon: ['cobblemon', 'кобблмон', 'кобблемон'],
+  'epic-fight': ['epic fight', 'эпик файт'], 'farmers-delight': ["farmer's delight", 'farmers delight', 'фармерс делайт'],
+  'the-twilight-forest-dungeons-villages': ['twilight forest', 'сумеречный лес'],
+}
+
 const COLORS = ['#ffb74d', '#4dd0e1', '#ba68c8', '#81c784', '#f06292', '#7986cb', '#ffd54f', '#4db6ac']
 
 // слова для узнавания: одно слово — только целиком («create»), несколько — фраза («iron's spells»)
@@ -438,6 +460,6 @@ const stemsOf = title => {
 }
 
 export const MOD_THEMES = MODS.map(([slug, title], i) => ({
-  id: 'mod:' + slug, label: title, color: COLORS[i % COLORS.length], stems: stemsOf(title),
+  id: 'mod:' + slug, label: title, color: COLORS[i % COLORS.length], stems: [...new Set([...stemsOf(title), ...(ALIASES[slug] || [])])],
   categories: [], queries: [title], pinned: [slug],
 }))

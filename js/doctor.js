@@ -44,7 +44,7 @@ export function diagnose(text, mods) {
     // «файл не найден» — мод просто создаёт свои настройки, это не падение
     if (/^\s*(Caused by:|Suppressed:|[\w.$]+(Exception|Error)\b)/.test(line)) { searching = !/FileNotFoundException|NoSuchFileException/.test(line); continue }
     if (!searching) continue
-    const frame = line.match(/^\s*at (?:knot\/{1,2})?([a-zA-Z_][\w.$<>]+)\(/)
+    const frame = line.match(/^\s*at (?:[^\s/()]*\/)*([a-zA-Z_][\w.$<>]+)\(/)
     if (!frame) continue
     // в latest.log у строки стека есть имя файла мода: «~[destroying-minecraft-1.0.0.jar:?]»
     const jar = line.match(/\[([^[\]]+\.jar)/)?.[1]
@@ -166,7 +166,7 @@ export function examineLog(text) {
     add(dup.join(' и '), `оба несут внутри одну и ту же библиотеку (${m[3]})`, `Удалите ${dup[0]} или обновите его.`, { ids: dup })
   }
   // датапак внутри мода сломал мир: «Failed to parse minecraft:worldgen/noise_settings/caves.json from pack mr_caves__canyons»
-  for (const m of text.matchAll(/Failed to (?:parse|load) [^\n]*? from pack (?:mr_|file\/)?([A-Za-z0-9_\-.]+)/g)) {
+  for (const m of text.matchAll(/Failed to (?:parse|load) [^\n]*? from pack (?:\w+\/)?(?:mr_|file\/)?([A-Za-z0-9_\-.]+)/g)) {
     add(m[1], 'его данные мира не подходят этой версии игры (датапак внутри мода)')
   }
   for (const m of text.matchAll(/Mixin \[([\w.-]+?)\.mixins\.json:[^\]]*\][^\n]*?FAILED/g)) {

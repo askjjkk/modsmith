@@ -33,7 +33,7 @@ function stemHits(stem, toks, text) {
   const s = normalize(stem)
   if (s.includes(' ')) {
     const at = text.indexOf(s.trim())
-    return at < 0 ? [] : [{ word: s.trim(), pos: text.slice(0, at).split(/[^a-zа-я0-9.+-]+/i).filter(Boolean).length }]
+    return at < 0 ? [] : [{ word: s.trim(), pos: text.slice(0, at).split(/[^a-zа-я0-9.+-]+/i).filter(Boolean).length, len: s.trim().split(/[^a-zа-я0-9.+-]+/i).filter(Boolean).length }]
   }
   const exact = s[0] === '='
   const core = exact ? s.slice(1) : s
@@ -75,7 +75,7 @@ export function analyze(text) {
   for (const theme of THEMES) {
     const hits = theme.stems.flatMap(stem => stemHits(stem, toks, t))
     if (!hits.length) continue
-    hits.forEach(h => used.add(h.pos))
+    hits.forEach(h => { for (let k = 0; k < (h.len || 1); k++) used.add(h.pos + k) }) // у фразы заняты все её слова
     const positive = hits.filter(h => !neg.has(h.pos))
     if (positive.length) themes.set(theme.id, { theme, word: positive[0].word, via: null })
     else excluded.set(theme.id, theme)
@@ -127,7 +127,8 @@ export function analyze(text) {
 
   // слова, которых не узнала ни одна тема: переводим по словарю и ищем моды прямо по ним (тема «на лету»)
   let dynamic = 0
-  toks.forEach((tok, pos) => {
+  toks.forEach((rawTok, pos) => {
+    const tok = rawTok.replace(/[.+-]+$/, '')
     if (dynamic >= 4 || used.has(pos) || tok.length < 3 || /\d/.test(tok) || STOPWORDS.test(tok) || EN_STOP.has(tok)) return
     const found = /^[a-z]/.test(tok) ? (tok.length >= 4 ? { en: tok } : null) : lookup(tok)
     if (!found) return
