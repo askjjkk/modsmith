@@ -62,14 +62,14 @@ export const MIN_DOWNLOADS = 15000
 export const ECOSYSTEMS = [
   ['Cobblemon', /\bcobblemon\b/i, 'cobblemon', false],
   ['Pixelmon', /\bpixelmon\b/i, 'pixelmon', false],
-  ['Create', /^create[:\s]|\bcreate addon|\baddon (for|to) create\b|\bfor create\b/i, 'create', false],
+  ['Create', /^create[:\s]|\bcreate addon|\baddon (for|to) create\b|\bfor create\b/i, ['create', 'create-fabric'], false],
   ['Mekanism', /\bmekanism\b/i, 'mekanism', false],
   ['Applied Energistics 2', /\bapplied energistics\b|\bae2\b/i, 'ae2', false],
   ['Iron\'s Spells', /\biron'?s spells\b/i, 'irons-spells-n-spellbooks', false],
   ['Ars Nouveau', /\bars nouveau\b/i, 'ars-nouveau', false],
   ['Botania', /\bbotania\b/i, 'botania', false],
   ['Tinkers\' Construct', /\btinkers'? construct\b/i, 'tinkers-construct', false],
-  ['L_Ender\'s Cataclysm', /\bcataclysm\b/i, 'l_enders_cataclysm', false],
+  ['L_Ender\'s Cataclysm', /\bcataclysm\b/i, 'l_enders-cataclysm', false],
   ['Alex\'s Mobs', /\balex'?s mobs\b/i, 'alexs-mobs', true],
   ['Farmer\'s Delight', /\bfarmer'?s delight\b/i, 'farmers-delight', true],
   ['Origins', /\borigins? (addon|expansion)\b/i, 'origins', true],
@@ -80,9 +80,11 @@ export const ECOSYSTEMS = [
 export function missingEcosystem(project, chosen) {
   const text = `${project.title} ${project.description || ''}`
   const have = new Set([...chosen.values()].map(m => m.project.slug))
-  for (const [name, re, slug, auto] of ECOSYSTEMS) {
-    if (project.slug === slug || have.has(slug)) continue
-    if (re.test(text)) return { name, slug, auto }
+  for (const [name, re, slugs, auto] of ECOSYSTEMS) {
+    // у некоторых основ разные адреса под загрузчики (Create и Create Fabric)
+    const all = [slugs].flat()
+    if (all.includes(project.slug) || all.some(s => have.has(s))) continue
+    if (re.test(text)) return { name, slug: all[0], auto }
   }
   return null
 }
@@ -129,11 +131,13 @@ export function themeScore(theme, p) {
   return Math.log10((p.downloads || 0) + 1) + (cat ? 1 : 0) + (inTitle ? 1.5 : inText ? 0.7 : -1)
 }
 
-// Мод «про» эту тему: её слово в названии или её особая категория (для «без магии»)
+// Мод «про» эту тему: её слово в названии или её особая категория (для «без магии»).
+// Общие слова не считаются: «без монстров» не должно выкидывать Alex's Mobs с лисами и капибарами.
 export function matchesTheme(theme, p) {
   const specific = (theme.categories || []).filter(c => !['adventure', 'game-mechanics', 'utility', 'decoration', 'worldgen', 'equipment', 'mobs'].includes(c))
-  return titleMatches(theme, p) || specific.some(c => (p.categories || []).includes(c))
+  return titleMatches(theme, p, true) || specific.some(c => (p.categories || []).includes(c))
 }
+const GENERIC_WORDS = new Set(['mobs', 'mob', 'creatures', 'creature', 'animals', 'entities', 'hostile', 'more', 'new', 'better', 'mod', 'mods', 'blocks', 'items', 'the', 'and', 'world'])
 
 // слово темы (из её английских запросов) встречается в описании мода целым словом
 export function mentions(theme, p) {
@@ -142,10 +146,11 @@ export function mentions(theme, p) {
     .some(w => new RegExp(`[^a-z]${w.replace(/s$/, '')}s?[^a-z]`).test(text))
 }
 
-export function titleMatches(theme, p) {
+export function titleMatches(theme, p, skipGeneric = false) {
   const title = ` ${p.title.toLowerCase()} `
   const words = theme.queries.flatMap(q => q.toLowerCase().split(' '))
     .concat(theme.stems.filter(s => /^[a-z=]/.test(s)).map(s => s.replace('=', '')))
+    .filter(w => !skipGeneric || !GENERIC_WORDS.has(w))
   // короткие слова — только целиком («mana» не должно совпасть с «Management», «tram» — с «Trample»)
   return words.some(w => w.length > 2 && (w.length > 5
     ? title.includes(w)
@@ -398,7 +403,7 @@ export class PackBuilder {
         // версия, которую мод сам разрешает (так же проверит и игра при запуске)
         const range = metas[i].ranges?.[depId]
         const have = libVersion(d.version.number, this.version)
-        if (range && have && !rangeFits(range, metas[i].mcKind, have)) {
+        if (range && have && !rangeFits(range, metas[i].mcKind, have, this.version)) {
           this.remove(m.project.id, `нужен ${d.project.title} версии ${range}, а под ${this.version} есть только ${have}`)
           removed = true
           break
@@ -437,6 +442,34 @@ export class PackBuilder {
    * Проверка «что внутри»: читает fabric.mod.json / mods.toml каждого мода.
    * Чего не хватает — ищет и добавляет; не нашлось — убирает мод, которому это нужно.
    */
+  /**
+   * Замена мода на похожий из той же темы (кнопка «↻» на карточке): старый убирается,
+   * новый добавляется со всеми проверками (зависимости, конфликты, файл внутри jar). Возвращает новый мод или null.
+   */
+  async replace(mod, theme) {
+    const pool = (await this.candidates(theme)).filter(p => p.id !== mod.project.id && !this.chosen.has(p.id) && !this.vetoed.has(p.id))
+    this.remove(mod.project.id, 'заменён на похожий по вашей просьбе')
+    for (const p of pool.slice(0, 25)) {
+      if (await this.tryAdd(p, mod.section, `вместо ${mod.project.title}`)) {
+        await this.verifyJars()
+        const added = this.chosen.get(p.id)
+        if (added) {
+          const meta = await this.metaOf(added).catch(() => null)
+          added.ids = [...new Set([...(meta?.ids || []), norm(added.project.slug)])]
+          added.depends = meta?.depends || []
+          return added
+        }
+      }
+    }
+    // замены не нашлось — возвращаем старый мод на место
+    this.vetoed.delete(mod.project.id)
+    this.skipped = this.skipped.filter(x => x.title !== mod.project.title)
+    this.chosen.set(mod.project.id, mod)
+    const g = groupOf(mod.project)
+    if (g && !this.groups.has(g)) this.groups.set(g, mod.project.id)
+    return null
+  }
+
   // Подходит ли файл мода к этой сборке. Возвращает причину или null.
   fileProblem(meta) {
     if (!meta) return null
@@ -478,7 +511,7 @@ export class PackBuilder {
     const v = list.find(x => {
       const lv = libVersion(x.version_number, this.version)
       const f = fileOf(x)
-      return lv && f && !rangeFits(range, kind, lv) && !wrongMcInFilename(f.filename, this.version)
+      return lv && f && !rangeFits(range, kind, lv, this.version) && !wrongMcInFilename(f.filename, this.version)
     })
     if (!v) return false
     mod.version = { id: v.id, number: v.version_number, date: v.date_published }
@@ -508,7 +541,7 @@ export class PackBuilder {
         if (!other || other === m || !this.chosen.has(other.project.id)) continue
         // обычно несовместимость только со старыми версиями («Cristel Lib» и старые Towns and Towers)
         const have = libVersion(other.version.number, this.version)
-        if (range && range !== '*' && have && !rangeFits(range, metas[i].mcKind, have)) continue
+        if (range && range !== '*' && have && !rangeFits(range, metas[i].mcKind, have, this.version)) continue
         // несовместим только со старыми версиями: ставим новее (Sodium 0.8.13 не дружит с Iris до 1.8.13)
         if (range && range !== '*' && await this.upgradeOutOf(other, range, metas[i].mcKind)) return true
         this.remove(m.project.id, `автор пишет, что он несовместим с ${other.project.title}`)
@@ -543,6 +576,9 @@ export class PackBuilder {
       mods.forEach((m, i) => {
         for (const dep of metas[i]?.depends || []) {
           if (isPlatform(dep) || provided.has(dep)) continue
+          // библиотека вложена в сам мод под другим именем файла: «registrate_fabric» в Registrate-MC1.20-….jar,
+          // «team_reborn_energy» в energy-….jar — загрузчик найдёт её внутри, докачивать не нужно
+          if (bundles(metas[i], dep)) continue
           if (!missing.has(dep)) missing.set(dep, [])
           missing.get(dep).push(m)
         }
@@ -566,6 +602,11 @@ export class PackBuilder {
       }
     }
   }
+}
+
+// Мод везёт эту библиотеку внутри себя: имя вложенного файла похоже на id зависимости
+export function bundles(meta, dep) {
+  return (meta?.nested || []).some(n => n.length >= 4 && (dep.includes(n) || n.includes(dep)))
 }
 
 // Выполняет fn для элементов, не больше limit одновременно; порядок результатов сохраняется
@@ -667,11 +708,23 @@ export async function buildPack(opts, api, emit = () => {}) {
     m.ids = [...new Set([...(meta?.ids || []), norm(m.project.slug)])]
     m.depends = meta?.depends || []
   }
+  // библиотека помечена «только для игры», но её требует серверный мод (Simply Swords -> Simply Tooltips):
+  // на сервере без неё падение, значит ставим и туда
+  const byId = new Map(b.mods().flatMap(m => m.ids.map(id => [id, m])))
+  for (const m of b.mods()) {
+    if (m.project.server === 'unsupported') continue
+    for (const dep of m.depends) {
+      const lib = byId.get(dep)
+      if (lib && lib.project.server === 'unsupported' && !CLIENT_ONLY[lib.project.slug]) lib.project = { ...lib.project, server: 'required' }
+    }
+  }
   progress(0.96, 'Проверяю загрузчик…')
   const loaderVersion = await api.loaderVersion(opts.loader, opts.version)
   progress(1, 'Готово')
   // темы, по которым в итоге не осталось ни одного мода: честно скажем об этом
-  const emptyThemes = themes.filter(t => t.theme !== VANILLA_PLUS && !b.mods().some(m => m.section.id === t.theme.id)).map(t => t.theme.label)
-  return { mods: b.mods(), extras, skipped: b.skipped, emptyThemes, loaderVersion, version: opts.version, loader: opts.loader,
+  // темы про оптимизацию закрывает база («Оптимизация») — о них не пишем, что пусто
+  const coveredByBase = t => opts.perf && (t.theme.categories || []).includes('optimization')
+  const emptyThemes = themes.filter(t => t.theme !== VANILLA_PLUS && !coveredByBase(t) && !b.mods().some(m => m.section.id === t.theme.id)).map(t => t.theme.label)
+  return { mods: b.mods(), extras, skipped: b.skipped, emptyThemes, loaderVersion, version: opts.version, loader: opts.loader, builder: b,
     ref: ref && { name: ref.name, license: ref.license, version: ref.version, configs: ref.configs } }
 }

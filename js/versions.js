@@ -53,8 +53,10 @@ export function inFabricRange(pred, v) {
  * Подходит ли версия v под условие из описания мода — так же мягко, как проверяет сама игра.
  * kind: 'maven' (mods.toml) или 'fabric'. Бывает, что в mods.toml записано условие в стиле Fabric («>=1.21 <=1.21.1»).
  */
-export function rangeFits(range, kind, v) {
+export function rangeFits(range, kind, v, mc = null) {
   if (range == null || range === '') return true
+  // «[1.20.1-2,1.20.1-3)» — версии с приставкой игры: сравниваем без неё (Iron's Lib, Farmer's Delight)
+  if (mc && typeof range === 'string') range = range.split(`${mc}-`).join('')
   if (kind === 'maven' && !Array.isArray(range)) {
     if (/[[(]/.test(range)) return inMavenRange(range, v, { upperInclusive: true })
     if (/[<>=~^*]|\.x\b/.test(range)) return inFabricRange(range, v)

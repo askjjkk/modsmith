@@ -57,12 +57,14 @@
 .pet-kind.on { border-color: var(--xp); color: var(--text); background: rgba(125, 255, 106, .08); }
 .pet-hide { grid-column: 1 / -1; padding: 6px; font: 600 12px var(--body); color: var(--muted); background: none; border: 1px dashed rgba(255, 255, 255, .15); border-radius: 9px; cursor: pointer; }
 .pet-hide:hover { color: var(--redstone); border-color: rgba(255, 90, 79, .5); }
-.pet-log { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; scrollbar-width: thin; }
-.pet-msg { margin: 0; padding: 8px 11px; font-size: 14px; line-height: 1.45; border-radius: 13px; max-width: 88%; animation: pop .35s var(--spring) both; }
-.pet-msg.pet { align-self: flex-start; background: rgba(183, 123, 255, .16); border-bottom-left-radius: 4px; }
-.pet-msg.me { align-self: flex-end; background: rgba(125, 255, 106, .14); border-bottom-right-radius: 4px; }
+.pet-log { display: flex; flex-direction: column; gap: 6px; max-height: 220px; min-height: 0; overflow-y: auto; scrollbar-width: thin; overscroll-behavior: contain; }
+.pet-msg { margin: 0; padding: 8px 11px; font-size: 14px; line-height: 1.45; border-radius: 13px; max-width: 88%; overflow-wrap: anywhere; animation: pop .35s var(--spring) both; }
+.pet-msg.from-pet { align-self: flex-start; background: rgba(183, 123, 255, .16); border-bottom-left-radius: 4px; }
+.pet-msg.from-me { align-self: flex-end; background: rgba(125, 255, 106, .14); border-bottom-right-radius: 4px; }
 .pet-msg.typing::after { content: '• • •'; letter-spacing: 2px; color: var(--muted); animation: blink 1s steps(2) infinite; }
-.pet-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.pet-chips { display: flex; flex-wrap: wrap; gap: 5px; max-height: 120px; overflow-y: auto; scrollbar-width: thin; transition: max-height .35s var(--smooth); }
+.pet-chat.talked .pet-chips { max-height: 31px; }
+.pet-chat.talked .pet-chips:hover { max-height: 120px; }
 .pet-chips button { padding: 5px 9px; font: 600 12px var(--body); color: #c9cfe0; cursor: pointer; background: rgba(255, 255, 255, .05);
   border: 1px solid rgba(255, 255, 255, .1); border-radius: 9px; transition: border-color .2s, color .2s, transform .25s var(--spring); }
 .pet-chips button:hover { color: var(--text); border-color: rgba(183, 123, 255, .5); transform: translateY(-2px); }

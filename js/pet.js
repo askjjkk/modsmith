@@ -392,7 +392,7 @@ function buildChat() {
 
   function say(text, who) {
     const p = document.createElement('p')
-    p.className = `pet-msg ${who}`
+    p.className = `pet-msg from-${who}`
     log.append(p)
     if (who === 'me') { p.textContent = text; log.scrollTop = log.scrollHeight; return Promise.resolve() }
     // «печатает…», потом текст появляется по буквам
@@ -423,6 +423,7 @@ function buildChat() {
   }
 
   async function ask(q) {
+    box.classList.add('talked') // готовые вопросы сворачиваются в одну строку, раскрываются при наведении
     await say(q, 'me')
     const a = answerFor(q)
     api.onMood?.('…')

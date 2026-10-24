@@ -11,6 +11,7 @@ import { DEFAULT_SHADER, RESOURCE_PACKS, SHADERS, detectGraphics, graphicsConfig
 import { startSky } from './bg.js'
 import { makeTextures } from './textures.js'
 import { startPet } from './pet.js'
+import { VERIFIED } from './verified.js'
 
 const $ = s => document.querySelector(s)
 const api = createApi()
@@ -480,6 +481,9 @@ function countUp(el, to, suffix = '') {
   requestAnimationFrame(step)
 }
 
+// моды этой сборки, которые уже запускались на нашем сервере с созданием мира
+const verifiedSet = pack => new Set(VERIFIED[`${pack.loader}@${pack.version}`] || [])
+
 function renderStats() {
   const pack = state.pack
   const mods = pack.mods.filter(m => state.enabled.has(m.project.id))
@@ -493,6 +497,9 @@ function renderStats() {
     [Math.round(mb * 10) / 10, '', 'МБ скачать'],
     [ramFor(mods.length), ' ГБ', 'памяти выделить игре'],
   ]
+  const ok = verifiedSet(pack)
+  const checked = mods.filter(m => ok.has(m.project.id)).length
+  if (checked) items.push([checked, '', 'уже проверены запуском'])
   for (const [num, suffix, label] of items) {
     const s = document.createElement('div')
     s.className = 'stat'
@@ -547,6 +554,25 @@ function card(mod, index) {
   reason.className = 'reason'
   reason.textContent = mod.reason
   el.append(img, h3, toggle, meta, p, reason)
+  // «↻ похожий» — только для тематических модов: у базы и библиотек замена не нужна
+  const theme = THEME_BY_ID.get(mod.section.id)
+  if (theme && !mod.dep && state.pack?.builder) {
+    const swap = document.createElement('button')
+    swap.type = 'button'
+    swap.className = 'swap'
+    swap.textContent = '↻'
+    swap.dataset.tip = 'Заменить на похожий мод этой же темы'
+    swap.setAttribute('aria-label', `Заменить ${mod.project.title} на похожий`)
+    swap.addEventListener('click', () => replaceMod(mod, theme, swap))
+    el.append(swap)
+  }
+  if (state.pack && verifiedSet(state.pack).has(mod.project.id)) {
+    const v = document.createElement('span')
+    v.className = 'verified'
+    v.textContent = '✓ проверен запуском'
+    v.dataset.tip = `Мы запускали сервер ${LOADER_NAMES[state.pack.loader]} ${state.pack.version} с этим модом в сборке — мир создался`
+    el.append(v)
+  }
 
   el.addEventListener('pointermove', e => {
     if (reduceMotion) return
@@ -559,6 +585,28 @@ function card(mod, index) {
   })
   el.addEventListener('pointerleave', () => { el.style.setProperty('--rx', '0deg'); el.style.setProperty('--ry', '0deg') })
   return el
+}
+
+async function replaceMod(mod, theme, btn) {
+  if (btn.classList.contains('busy')) return
+  btn.classList.add('busy')
+  const b = state.pack.builder
+  try {
+    const added = await b.replace(mod, theme)
+    state.pack.skipped = b.skipped
+    // моды, которые игрок выключил сам, остаются выключенными
+    const off = new Set(state.pack.mods.filter(m => !state.enabled.has(m.project.id)).map(m => m.project.id))
+    state.pack.mods = b.mods()
+    showResult(state.pack)
+    for (const id of off) state.enabled.delete(id)
+    renderStats()
+    toast(added ? `Заменил: ${mod.project.title} → ${added.project.title}` : `Других подходящих модов этой темы под ${state.pack.version} нет — оставил ${mod.project.title}.`, !added)
+    // раскрываем тот же раздел, чтобы было видно замену
+    document.querySelectorAll('.sec').forEach(d => { if (d.style.getPropertyValue('--c') === mod.section.color) d.open = true })
+  } catch {
+    toast('Не получилось заменить мод. Попробуйте ещё раз.', true)
+    btn.classList.remove('busy')
+  }
 }
 
 function onToggle(mod, toggle, el) {

@@ -5,7 +5,8 @@ import { THEMES } from './themes.js'
 import { diagnose, examineLog, findCulprits, modsFromLog } from './doctor.js'
 import { INTENTS } from './intents.js'
 import { COMFORT_OPTIONS } from './comfort-options.js'
-import { PackBuilder, buildPack, groupOf, libVersion, majorMinor, missingBase, pickVersion } from './builder.js'
+import { PackBuilder, buildPack, bundles, groupOf, libVersion, majorMinor, matchesTheme, missingBase, pickVersion } from './builder.js'
+import { rangeFits } from './versions.js'
 import { buildIndex, mrpackBlob, serverScripts } from './mrpack.js'
 import { detectGraphics, graphicsConfigs } from './graphics.js'
 import { isPlatform, nestedIds, parseFabric, parseToml } from './jarmeta.js'
@@ -386,6 +387,21 @@ test('словарь: слова без своей темы ищутся по п
   eq(analyze('классная сборка').themes.some(t => t.via === 'поиск'), false)
   eq(analyze('жёсткая сборка').themes.some(t => t.via === 'поиск'), false)
   eq(analyze('магия на фабрике').themes.some(t => t.theme.id === 'industrial'), false)
+})
+
+test('мелкие правила: версии с приставкой игры, «без монстров» не трогает Alex’s Mobs, Create Fabric — тоже Create', () => {
+  eq(rangeFits('[1.20.1-2,1.20.1-3)', 'maven', '2.2.0', '1.20.1'), true)
+  eq(matchesTheme({ queries: ['monsters', 'hostile mobs'], stems: ['monster'], categories: ['mobs'] }, { title: "Alex's Mobs", categories: ['mobs'] }), false)
+  eq(missingBase({ slug: 'x', title: 'Create: Addon', description: '' }, new Map([['c', { project: { slug: 'create-fabric' } }]])), null)
+})
+
+test('вложенные библиотеки и отрицание до предлога', () => {
+  eq(bundles({ nested: ['registrate'] }, 'registrate_fabric'), true)
+  eq(bundles({ nested: ['energy'] }, 'team_reborn_energy'), true)
+  eq(bundles({ nested: ['mixinextras'] }, 'cloth_config'), false)
+  const a = analyze('уютная сборка: декор, без монстров, для слабого пк')
+  eq(a.excluded.some(t => t.id === 'performance'), false)
+  eq(analyze('без магии и драконов').excluded.map(t => t.id).sort().filter(i => ['magic', 'dragons'].includes(i)), ['dragons', 'magic'])
 })
 
 // --- понимание запроса v2 ---

@@ -70,6 +70,10 @@ def jar_info(path: Path) -> dict:
                 j = json.loads(z.read("fabric.mod.json").decode("utf-8", "replace"))
                 ids = [norm(j["id"])] + [norm(p) for p in j.get("provides", [])]
                 return {"ids": ids, "depends": [norm(d) for d in j.get("depends", {})], "name": j.get("name", j["id"])}
+            if "quilt.mod.json" in names:
+                q = json.loads(z.read("quilt.mod.json").decode("utf-8", "replace")).get("quilt_loader", {})
+                deps = [d if isinstance(d, str) else d.get("id") for d in q.get("depends", []) if isinstance(d, str) or not d.get("optional")]
+                return {"ids": [norm(q.get("id", path.stem))], "depends": [norm(d) for d in deps if d], "name": q.get("id", path.stem)}
             for toml in ("META-INF/neoforge.mods.toml", "META-INF/mods.toml"):
                 if toml in names:
                     info = parse_toml(z.read(toml).decode("utf-8", "replace"))
@@ -101,6 +105,25 @@ def prepare_server(work_root: Path, mc: str, deps: dict, cache: dict) -> tuple:
             jar.write_bytes(fetch(f"https://meta.fabricmc.net/v2/versions/loader/{mc}/{loader}/{inst}/server/jar"))
             cache[key] = jar
         return None, ["-jar", str(cache[key]), "nogui"]
+    if "quilt-loader" in deps:
+        loader = deps["quilt-loader"]
+        home = work_root / f"quilt-{mc}-{loader}"
+        key = ("quilt", mc, loader)
+        if key not in cache:
+            for _ in range(3):
+                if (home / "quilt-server-launch.jar").exists():
+                    break
+                home.mkdir(parents=True, exist_ok=True)
+                installer = work_root / "quilt-installer.jar"
+                if not installer.exists():
+                    installer.write_bytes(fetch("https://quiltmc.org/api/v1/download-latest-installer/java-universal"))
+                subprocess.run(["java", "-jar", str(installer), "install", "server", mc, loader, "--download-server",
+                                f"--install-dir={home}"], capture_output=True, timeout=900)
+            if not (home / "quilt-server-launch.jar").exists():
+                raise RuntimeError(f"сервер Quilt {mc} не установился")
+            cache[key] = home
+        # общая папка сервера: моды и мир каждый раз свои (check_pack чистит mods и config)
+        return home, ["-jar", "quilt-server-launch.jar", "nogui"]
     if "neoforge" in deps or "forge" in deps:
         neo = "neoforge" in deps
         ver = deps["neoforge"] if neo else f"{mc}-{deps['forge']}"

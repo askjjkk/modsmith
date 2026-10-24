@@ -3,6 +3,8 @@
 
 import { EXTRA_THEMES } from './themes-extra.js'
 import { MORE_THEMES } from './themes-more.js'
+import { PLUS_THEMES } from './themes-plus.js'
+import { applyPins } from './pins.js'
 
 const CORE_THEMES = [
   { id: 'magic', label: 'Магия', color: '#b77bff', stems: ['маги', '=мага', '=магом', '=магов', 'волшеб', 'заклин', 'чар', 'колдов', 'ведьм', 'magic', 'spell', 'wizard', 'sorcer', 'witch'], categories: ['magic'], queries: ['magic', 'spells'], pinned: ['irons-spells-n-spellbooks', 'ars-nouveau', 'botania'] },
@@ -47,7 +49,8 @@ const CORE_THEMES = [
   { id: 'pokemon', label: 'Покемоны', color: '#ffeb3b', stems: ['покемон', 'pokemon'], categories: [], queries: ['pokemon'] },
 ]
 
-export const THEMES = [...CORE_THEMES, ...EXTRA_THEMES, ...MORE_THEMES]
+// лучшие моды каждой темы идут первыми (js/pins.js)
+export const THEMES = applyPins([...CORE_THEMES, ...EXTRA_THEMES, ...MORE_THEMES, ...PLUS_THEMES])
 
 // «Ванилла+» на случай, когда в описании нет понятных тем
 export const VANILLA_PLUS = { id: 'vanilla', label: 'Ванилла+', color: '#7ee081', stems: [], categories: [], queries: ['vanilla', 'quality of life', 'structures'], pinned: ['terralith', 'yungs-better-dungeons', 'supplementaries', 'waystones'] }
