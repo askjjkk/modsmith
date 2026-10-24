@@ -559,7 +559,7 @@ function card(mod, index) {
   if (theme && !mod.dep && state.pack?.builder) {
     const swap = document.createElement('button')
     swap.type = 'button'
-    swap.className = 'swap'
+    swap.className = 'swap-btn'
     swap.textContent = '↻'
     swap.dataset.tip = 'Заменить на похожий мод этой же темы'
     swap.setAttribute('aria-label', `Заменить ${mod.project.title} на похожий`)
@@ -626,9 +626,16 @@ function onToggle(mod, toggle, el) {
   renderStats()
 }
 
+// Шейдер и ресурспаки — не моды, но их тоже видно в результате и можно выключить
+const GFX_SECTION = { id: 'gfx-files', label: 'Шейдеры и ресурспаки', color: '#ffcf4a' }
+const extraCards = pack => (pack.extras || []).map(e => ({
+  project: e.project, version: { number: e.file.filename.replace(/\.zip$/i, '') }, file: e.file, section: GFX_SECTION,
+  reason: e.kind === 'shader' ? 'шейдер — включится в игре сам' : 'ресурспак — включится в игре сам', dep: false, extra: e,
+}))
+
 function showResult(pack) {
   state.pack = pack
-  state.enabled = new Set(pack.mods.map(m => m.project.id))
+  state.enabled = new Set([...pack.mods, ...(pack.extras || [])].map(m => m.project.id))
   renderStats()
   const empty = $('#empty-themes')
   empty.hidden = !pack.emptyThemes?.length
@@ -644,6 +651,8 @@ function showResult(pack) {
   const box = $('#sections')
   box.textContent = ''
   order.forEach((section, i) => box.append(sectionTile(section, pack.mods.filter(m => m.section.id === section.id), i)))
+  const gfx = extraCards(pack)
+  if (gfx.length) box.insertBefore(sectionTile(GFX_SECTION, gfx, 0), box.children[order.filter(s => !['perf', 'qol', 'polish', 'gfx', 'deps'].includes(s.id)).length] || null)
   renderSkipped(pack.skipped)
   const result = $('#result')
   result.hidden = false
@@ -744,7 +753,7 @@ function renderSkipped(list) {
 
 function enabledPack() {
   const pack = state.pack
-  return { ...pack, mods: pack.mods.filter(m => state.enabled.has(m.project.id)) }
+  return { ...pack, mods: pack.mods.filter(m => state.enabled.has(m.project.id)), extras: (pack.extras || []).filter(e => state.enabled.has(e.project.id)) }
 }
 
 const fileName = (pack, ext) => `${pack.text.slice(0, 40).replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '') || 'modsmith'}-${pack.version}.${ext}`
@@ -828,6 +837,23 @@ async function readLogFiles(files) {
   }))
   logText = parts.join('\n\n')
   $('#drop-name').textContent = `Загружено: ${list.map(f => f.name).join(', ')}`
+  runDoctor()
+}
+
+// Пример лога — как падала настоящая сборка NeoForge 1.21.1 (Lithium + Radium, мод не под ту версию, нет ARLib)
+const EXAMPLE_LOG = ['[main/INFO] [ModDiscoverer/SCAN]: ', '\tMod List:', '\t\tName Version (Mod Id)', '',
+  '\t\tLithium 0.15.4+mc1.21.1 (lithium)', '\t\tRadium Reforged 0.13.1 (radium)', '\t\tC2ME 0.4.0-alpha (c2me)',
+  '\t\tScalableLux 0.1.0.1 (scalablelux)', '\t\tLog Begone 1.0.3 (logbegone)', '\t\tTerralith 2.6.2 (terralith)',
+  '\t\tBiomes O Plenty 21.1 (biomesoplenty)', '--fml.mcVersion, 1.21.1',
+  'File mods\\Structory_Towers_26.2_v1.0.17.jar is not a valid mod file',
+  'Failed to create mod instance. ModID: aw_npc, class NPCs.Main',
+  'java.lang.NoClassDefFoundError: ARLib/network/SimpleNetworkPacket$SimpleNetworkDataReceiver',
+  "Exception in thread \"main\" java.lang.IllegalArgumentException: Decoration with key 'fabric-modId' already exists on config lithium.mixins.json",
+].join('\n')
+
+function showExample() {
+  logText = EXAMPLE_LOG
+  $('#drop-name').textContent = 'Пример: latest.log упавшей сборки NeoForge 1.21.1'
   runDoctor()
 }
 
@@ -1036,6 +1062,8 @@ async function main() {
   $('#craft').addEventListener('click', craft)
   $('#diagnose').addEventListener('click', runDoctor)
   $('#crash-file').addEventListener('change', e => readLogFiles(e.target.files))
+  $('#doctor-example').addEventListener('click', showExample)
+  if (location.hash === '#doctor-example') { showExample(); setTimeout(() => $('#doctor').scrollIntoView({ block: 'start' }), 300) }
   $('#crash').addEventListener('input', () => { logText = ''; $('#drop-name').textContent = '' })
   const drop = $('#drop')
   for (const ev of ['dragenter', 'dragover']) drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over') })

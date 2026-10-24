@@ -52,6 +52,9 @@ const fileOfVersion = v => {
 export async function addGraphics(b, api, graphics) {
   const extras = []
   const section = { id: 'gfx', label: 'Шейдеры и ресурспаки', color: '#ffcf4a' }
+  // Resourcify — поиск и установка ресурспаков и шейдеров прямо в игре (просьба пользователя: во все сборки)
+  const [resourcify] = await api.projects(['resourcify'])
+  if (resourcify && !b.chosen.has(resourcify.id)) await b.tryAdd(resourcify, section, 'ресурспаки и шейдеры прямо из игры', { allowLibrary: true, quiet: true })
   if (graphics.shader) {
     const [mod] = await api.projects([SHADER_MOD[b.loader]])
     const [shader] = await api.projects([graphics.shader])

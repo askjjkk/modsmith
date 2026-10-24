@@ -22,9 +22,10 @@ export const CHUNK_EXTRAS = {
 // Log Begone прячет ошибки из лога — без них не найти виновника падения
 export const REF_SKIP = {
   fabric: /^log-begone/,
-  quilt: /^log-begone/,
-  forge: /^log-begone/,
-  neoforge: /^(c2me|scalablelux|saturn|log-begone)/,
+  quilt: /^(log-begone|fabric-api)$/,
+  // Chunky — прогрузка мира заранее на сервере, в сборке игрока не нужен; с Distant Horizons роняет создание мира
+  forge: /^(log-begone|chunky)$/,
+  neoforge: /^(c2me|scalablelux|saturn|log-begone|chunky)/,
 }
 
 // Конфиги, которые не нужны или вредны в чужой сборке

@@ -85,7 +85,9 @@ def jar_info(path: Path) -> dict:
 
 
 # Мир создан и сервер готов принимать игроков
-SUCCESS = ("Done (",)
+SUCCESS = ("Done (", "MODSMITH-SILENT-OK")
+# Сколько молчания после «Preparing level» проверять снимком потоков (некоторые сборки не печатают «Done»)
+SILENCE = 60
 # Сколько ждать создания мира; дольше — считаем, что генерация зависла
 WORLD_TIMEOUT = 420
 
@@ -150,6 +152,19 @@ def prepare_server(work_root: Path, mc: str, deps: dict, cache: dict) -> tuple:
     raise ValueError("неизвестный загрузчик")
 
 
+def thread_dump(pid: int) -> str:
+    return subprocess.run([str(Path(JAVA).with_name("jcmd.exe")), str(pid), "Thread.print"], capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=60).stdout
+
+
+def server_idle(dump: str) -> bool:
+    """Главный поток сервера спокойно ждёт следующего такта — значит, мир создан и сервер работает."""
+    m = re.search(r'"Server thread".*?\n\n', dump, re.S)
+    block = m.group(0) if m else ""
+    busy = ("ChunkMap", "ServerChunkCache", "prepareLevels", "createLevels", "class_3215", "class_3898", "WorldGen", "Feature")
+    return "parkNanos" in block and "MinecraftServer" in block and not any(k in block for k in busy)
+
+
 def run_server(work: Path, args: list) -> str:
     # свежий мир на каждую попытку, EULA принята (разрешение пользователя), сторожевой таймер сервера выключен:
     # медленную генерацию с модами он иначе принимает за зависание
@@ -167,21 +182,34 @@ def run_server(work: Path, args: list) -> str:
     threading.Thread(target=lambda: [lines_q.put(l) for l in proc.stdout] + [lines_q.put(None)], daemon=True).start()
     lines = []
     deadline = time.time() + WORLD_TIMEOUT
+    level_started = False
     try:
         while True:
             try:
-                line = lines_q.get(timeout=max(0.1, deadline - time.time()))
+                line = lines_q.get(timeout=max(0.1, min(SILENCE, deadline - time.time())) if level_started else max(0.1, deadline - time.time()))
+                if line is None and proc.poll() is None:
+                    # вывод закрылся, а сервер жив (бывает на Quilt): дальше смотрим только по снимку потоков
+                    time.sleep(SILENCE)
+                    raise queue.Empty
             except queue.Empty:
+                if level_started and time.time() < deadline and proc.poll() is None:
+                    dump = thread_dump(proc.pid)
+                    if server_idle(dump):
+                        lines.append("MODSMITH-SILENT-OK: «Done» не напечатан, но сервер создал мир и работает (снимок потоков)")
+                        break
+                    if time.time() < deadline:
+                        continue
                 # мир не создался за отведённое время: снимок потоков покажет, на каком моде всё встало
                 lines.append(f"MODSMITH-HANG: мир не создался за {WORLD_TIMEOUT} с")
-                dump = subprocess.run([str(Path(JAVA).with_name("jcmd.exe")), str(proc.pid), "Thread.print"], capture_output=True, text=True,
-                                      encoding="utf-8", errors="replace", timeout=60).stdout
+                dump = thread_dump(proc.pid)
                 (work / "hang-threads.txt").write_text(dump, encoding="utf-8")
                 lines.append(dump)
                 break
             if line is None:
                 break
             lines.append(line.rstrip())
+            if "Preparing level" in line or "Preparing start region" in line:
+                level_started = True
             if any(s in line for s in SUCCESS):
                 break
             saved = re.search(r"crash report has been saved to: (.+\.txt)", line)
@@ -192,7 +220,8 @@ def run_server(work: Path, args: list) -> str:
                 except OSError:
                     pass
                 break
-            if "Could not execute entrypoint" in line or "Incompatible mods found" in line or "Crash Report" in line \
+            # только настоящий заголовок отчёта: в списке модов Quilt есть «Quilted Fabric Crash Report Info»
+            if "Could not execute entrypoint" in line or "Incompatible mods found" in line or "---- Minecraft Crash Report" in line \
                     or "Mixin apply failed" in line or "MixinApplyError" in line:
                 end = time.time() + 15
                 while time.time() < end:
@@ -235,6 +264,10 @@ def culprits(log: str, by_id: dict, files_by_name: dict = None) -> dict:
     # NeoForge/Forge: мод не смог создаться или подписаться на события (часто — не та версия основного мода)
     for m in re.finditer(r"(?:Failed to create mod instance|Failed to register automatic subscribers)\. ModID: ([a-z0-9_\-]+)", log):
         add(m.group(1), "упал при запуске (не та версия основного мода или нет библиотеки)")
+    # «Mixin [valkyrienskies-common.mixins.json:…] … FAILED during APPLY» — мод видно по имени файла встраивания
+    for m in re.finditer(r"Mixin \[([\w.-]+?)\.mixins\.json:[^\]]*\][^\n]*?FAILED", log):
+        cfg = m.group(1)
+        add(re.split(r"[-.]", cfg)[0], "не смог встроиться в игру: эту часть уже меняет другой мод")
     # Forge: два мода несут одну и ту же библиотеку внутри себя
     for m in re.finditer(r"Modules (\S+) and (\S+) export package", log):
         for mod in (m.group(1), m.group(2)):
@@ -255,7 +288,8 @@ def culprits(log: str, by_id: dict, files_by_name: dict = None) -> dict:
     searching = False
     for line in log.splitlines():
         if re.match(r"^\s*(Caused by:|Suppressed:|[\w.$]+(Exception|Error)\b)", line):
-            searching = True
+            # «файл не найден» — мод просто создаёт свои настройки, это не падение
+            searching = not re.search(r"FileNotFoundException|NoSuchFileException", line)
             continue
         frame = re.match(r"^\s*at (?:knot/{1,2})?([a-zA-Z_][\w.$<>]+)\(", line) if searching else None
         if not frame:

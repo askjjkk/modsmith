@@ -100,6 +100,8 @@ export const EXTRA_DEPS = {
 const DEP_SUBSTITUTE = {
   forge: { P7dR8mSH: 'forgified-fabric-api' },
   neoforge: { P7dR8mSH: 'forgified-fabric-api' },
+  // на Quilt — QFAPI (Fabric API внутри Quilt Standard Libraries); оба сразу — «Duplicate mandatory mod ids»
+  quilt: { P7dR8mSH: 'qsl' },
 }
 
 // Библиотеки, которые обычно не ломают старые моды при обновлении
@@ -120,8 +122,15 @@ export function majorMinor(versionNumber, mc) {
 const NOISE = /dragon ?ball|meme|joke|troll|april fools|\bmod ?pack\b|sky ?block|one ?block|void world/i
 
 // Насколько мод подходит теме: популярность + совпадение категории + слова темы в названии/описании
+// Моды, которые не подходят теме, хотя поиск их находит: для слабого ПК — тяжёлая дальняя прорисовка
+const THEME_AVOID = {
+  performance: ['distanthorizons', 'bobby', 'farsight', 'voxy', 'nvidium'],
+  fps_boost: ['distanthorizons', 'bobby', 'farsight', 'voxy'],
+  memory: ['distanthorizons', 'bobby', 'farsight', 'voxy'],
+}
+
 export function themeScore(theme, p) {
-  if (NOISE.test(p.title)) return -100
+  if (NOISE.test(p.title) || THEME_AVOID[theme.id]?.includes(p.slug)) return -100
   const text = `${p.title} ${p.description || ''}`.toLowerCase()
   const words = theme.queries.flatMap(q => q.toLowerCase().split(' '))
     .concat(theme.stems.filter(s => /^[a-z=]/.test(s)).map(s => s.replace('=', '')))
@@ -168,6 +177,9 @@ export function libVersion(number, mc) {
     (all, v) => (v === mc || v === family || v.startsWith(`${family}.`) ? ' ' : all))
   return cleaned.match(/\d+(?:\.\d+)+/)?.[0] || cleaned.match(/\d+/)?.[0] || null
 }
+
+// Какую версию Fabric Loader изображает Quilt Loader (видно в его отчёте об ошибке): моды Fabric проверяют именно её
+const QUILT_FABRIC = { '0.30': '0.19.3', '0.29': '0.16.10' }
 
 // NeoForge до 1.21.6 не читает описание без строки modLoader («Missing ModLoader in file»)
 const OLD_NEO = mc => cmpVer(mc, '1.21.6') < 0
@@ -244,6 +256,11 @@ export class PackBuilder {
 
   // Пытается добавить мод вместе с зависимостями. true — добавлен.
   async tryAdd(project, section, reason, { allowLibrary = false, quiet = false, noAlpha = false } = {}) {
+    // на Quilt Fabric API заменяет QFAPI: вдвоём загрузчик падает («Duplicate mandatory mod ids»)
+    if (this.loader === 'quilt' && project.slug === 'fabric-api') {
+      const [qsl] = await this.api.projects(['qsl'])
+      return qsl ? this.tryAdd(qsl, section, reason, { allowLibrary: true, quiet, noAlpha }) : false
+    }
     if (this.chosen.has(project.id) || this.vetoed.has(project.id)) return false
     if (!allowLibrary && isLibrary(project)) return false
     const g = groupOf(project)
@@ -316,7 +333,7 @@ export class PackBuilder {
     const seen = new Map()
     for (const p of lists.flat()) if (p && !seen.has(p.id) && !isLibrary(p)) seen.set(p.id, p)
     const score = p => (pinned.has(p.id) ? 100 : 0) + themeScore(theme, p)
-    let pool = [...seen.values()].filter(p => pinned.has(p.id) || p.downloads >= MIN_DOWNLOADS)
+    let pool = [...seen.values()].filter(p => (pinned.has(p.id) || p.downloads >= MIN_DOWNLOADS) && !THEME_AVOID[theme.id]?.includes(p.slug))
     if (!category) {
       // у темы нет категории на Modrinth: берём только моды со словом темы в названии
       const strict = pool.filter(p => pinned.has(p.id) || titleMatches(theme, p))
@@ -382,6 +399,25 @@ export class PackBuilder {
    * формально «>=1.7» подходит, но нужные классы уже удалены), и дополнения, у которых пропала основа.
    * Возвращает true, если что-то убрал.
    */
+  // Мод требует версию библиотеки (или загрузчика) новее, чем есть: ищем его версию постарше, которой хватает имеющейся
+  async downgradeFor(mod, depId, have) {
+    const list = await this.api.versions(mod.project.id, this.version, this.loaders)
+    const at = list.findIndex(v => v.id === mod.version.id)
+    for (const v of list.slice(at + 1, at + 13)) {
+      const file = fileOf(v)
+      if (!file || wrongMcInFilename(file.filename, this.version)) continue
+      const meta = await this.readMeta(file.url, file.size, undefined, this.loader)
+      if (!meta || this.fileProblem(meta)) continue
+      const r = meta.ranges?.[depId]
+      if (r && !rangeFits(r, meta.mcKind, have, this.version)) continue
+      mod.version = { id: v.id, number: v.version_number, date: v.date_published }
+      mod.file = file
+      this.metaCache.set(mod.project.id, Promise.resolve(meta))
+      return true
+    }
+    return false
+  }
+
   async checkStale(mods, metas) {
     const byId = new Map()
     mods.forEach((m, i) => metas[i]?.ids.forEach(id => byId.set(id, m)))
@@ -397,15 +433,31 @@ export class PackBuilder {
         }
       }
       if (!m.version.date || !metas[i]) continue
+      let changed = false
       for (const depId of metas[i].depends) {
+        const range = metas[i].ranges?.[depId]
+        // сам загрузчик: Fabric — выбранная версия, Quilt — версия Fabric, которую он изображает
+        if (range && ['fabricloader', 'fabric_loader'].includes(depId)) {
+          const have = this.loader === 'fabric' ? this.loaderVersion : this.loader === 'quilt' ? QUILT_FABRIC[String(this.loaderVersion).split('.').slice(0, 2).join('.')] : null
+          if (have && !rangeFits(range, metas[i].mcKind, have, this.version)) {
+            if (await this.downgradeFor(m, depId, have)) { changed = true; break }
+            this.remove(m.project.id, `нужен загрузчик новее (${range}), а есть ${have}`)
+            changed = true
+            break
+          }
+          continue
+        }
         const d = byId.get(depId)
         if (!d || d === m) continue
         // версия, которую мод сам разрешает (так же проверит и игра при запуске)
-        const range = metas[i].ranges?.[depId]
-        const have = libVersion(d.version.number, this.version)
+        // на Quilt Fabric API — внутри QFAPI: «7.7.0+0.92.2-1.20.1» значит Fabric API 0.92.2
+        const qfapi = this.loader === 'quilt' && d.project.slug === 'qsl' && ['fabric_api', 'fabric'].includes(depId)
+        const have = qfapi ? d.version.number.match(/\+(\d+\.\d+\.\d+)/)?.[1] : libVersion(d.version.number, this.version)
         if (range && have && !rangeFits(range, metas[i].mcKind, have, this.version)) {
+          // сначала пробуем версию мода постарше, которой хватает того, что есть
+          if (await this.downgradeFor(m, depId, have)) { changed = true; break }
           this.remove(m.project.id, `нужен ${d.project.title} версии ${range}, а под ${this.version} есть только ${have}`)
-          removed = true
+          changed = true
           break
         }
         if (STABLE_LIBS.has(d.project.slug)) continue
@@ -434,6 +486,7 @@ export class PackBuilder {
           break
         }
       }
+      if (changed) removed = true // мод заменён на версию постарше или убран — перепроверим сборку
     }
     return removed
   }
@@ -658,7 +711,9 @@ export async function buildPack(opts, api, emit = () => {}) {
   }
 
   // «только оптимизация»: тематические моды не нужны вовсе
-  const themes = opts.onlyBase ? [] : opts.themes.length ? opts.themes : [{ theme: VANILLA_PLUS, word: null }]
+  // шейдер уже выбран в «Графике» — темы «Графика»/«Шейдеры» не нужны: они тянут случайные моды вокруг шейдеров
+  const asked = opts.graphics?.shader ? opts.themes.filter(t => !['shaders', 'graphics'].includes(t.theme.id)) : opts.themes
+  const themes = opts.onlyBase ? [] : asked.length ? asked : [{ theme: VANILLA_PLUS, word: null }]
   const budget = SIZES[opts.size] || SIZES.normal
   const quota = Math.max(2, Math.ceil(budget / themes.length))
   progress(0.25, 'Ищу моды по темам…')
@@ -698,6 +753,7 @@ export async function buildPack(opts, api, emit = () => {}) {
   }
 
   progress(0.9, 'Заглядываю внутрь модов: что им нужно на самом деле…')
+  b.loaderVersion = await api.loaderVersion(opts.loader, opts.version)
   await b.verifyJars()
   // если мод для шейдеров не прошёл проверку — шейдер без него бесполезен
   const shaderModOk = b.mods().some(m => m.project.slug === SHADER_MOD[opts.loader])
@@ -719,7 +775,7 @@ export async function buildPack(opts, api, emit = () => {}) {
     }
   }
   progress(0.96, 'Проверяю загрузчик…')
-  const loaderVersion = await api.loaderVersion(opts.loader, opts.version)
+  const loaderVersion = b.loaderVersion
   progress(1, 'Готово')
   // темы, по которым в итоге не осталось ни одного мода: честно скажем об этом
   // темы про оптимизацию закрывает база («Оптимизация») — о них не пишем, что пусто

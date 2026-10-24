@@ -41,7 +41,8 @@ export function diagnose(text, mods) {
   // в каждом блоке ошибки (основная, «Caused by:», «Suppressed:») первая строка стека из кода мода — виновник
   let searching = false
   for (const line of text.split(/\r?\n/)) {
-    if (/^\s*(Caused by:|Suppressed:|[\w.$]+(Exception|Error)\b)/.test(line)) { searching = true; continue }
+    // «файл не найден» — мод просто создаёт свои настройки, это не падение
+    if (/^\s*(Caused by:|Suppressed:|[\w.$]+(Exception|Error)\b)/.test(line)) { searching = !/FileNotFoundException|NoSuchFileException/.test(line); continue }
     if (!searching) continue
     const frame = line.match(/^\s*at (?:knot\/{1,2})?([a-zA-Z_][\w.$<>]+)\(/)
     if (!frame) continue
@@ -163,6 +164,11 @@ export function examineLog(text) {
   for (const m of text.matchAll(/Modules (\S+) and (\S+) export package ([\w.]+)/g)) {
     const dup = [m[1], m[2]].filter(x => x.toLowerCase() !== 'mixinextras')
     add(dup.join(' и '), `оба несут внутри одну и ту же библиотеку (${m[3]})`, `Удалите ${dup[0]} или обновите его.`, { ids: dup })
+  }
+  for (const m of text.matchAll(/Mixin \[([\w.-]+?)\.mixins\.json:[^\]]*\][^\n]*?FAILED/g)) {
+    const mod = m[1].split(/[-.]/)[0]
+    add(mod, 'не смог встроиться в игру: эту же часть игры уже меняет другой мод (часто — мод оптимизации)',
+      `Удалите ${mod} или моды оптимизации, которые трогают то же самое (Lithium/Radium/Canary).`, { ids: [mod] })
   }
   for (const m of text.matchAll(/Decoration with key '[^']+' already exists on config ([\w.-]+)/g)) {
     const base = m[1].replace(/\.mixins?\.json$/, '').split('.')[0]

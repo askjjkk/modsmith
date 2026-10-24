@@ -137,7 +137,10 @@
       <summary>или вставить текст ошибки</summary>
       <textarea id="crash" rows="5" spellcheck="false" placeholder="---- Minecraft Crash Report ----&#10;…"></textarea>
     </details>
-    <button class="btn" id="diagnose" type="button"><span class="btn-text">Найти причину</span></button>
+    <div class="doctor-actions">
+      <button class="btn" id="diagnose" type="button"><span class="btn-text">Найти причину</span></button>
+      <button class="btn btn-ghost" id="doctor-example" type="button"><span class="btn-text">Посмотреть на примере</span></button>
+    </div>
     <div class="diag-result" id="diag-result" aria-live="polite"></div>
   </section>
 </main>

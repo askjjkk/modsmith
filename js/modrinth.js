@@ -103,9 +103,12 @@ export function createApi({ fetchImpl = (...a) => fetch(...a), concurrency = 6 }
         return ok?.loader.version || null
       }
       if (loader === 'quilt') {
+        // список приходит вперемешку: сортируем по номеру и берём самую новую стабильную (0.24 вместо 0.30 ломало QFAPI)
         const list = await getJson(`https://meta.quiltmc.org/v3/versions/loader/${mc}`)
-        const ok = (list || []).find(x => !/beta|pre/i.test(x.loader.version)) || list?.[0]
-        return ok?.loader.version || null
+        const num = v => v.split('-')[0].split('.').map(Number)
+        const newer = (a, b) => { const x = num(a), y = num(b); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (y[i] || 0) - (x[i] || 0); return 0 }
+        const versions = (list || []).map(x => x.loader.version).sort(newer)
+        return versions.find(v => !/beta|pre|rc/i.test(v)) || versions[0] || null
       }
       const manifest = await getJson(`${META}/${loader === 'forge' ? 'forge' : 'neo'}/v0/manifest.json`)
       const gv = manifest?.gameVersions?.find(g => g.id === mc)

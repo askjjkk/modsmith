@@ -68,10 +68,10 @@ export const BASE = {
   qol: {
     label: 'Удобства',
     color: '#ffcf4a',
-    fabric: ['modmenu', 'jei', 'emi', 'xaeros-minimap', 'xaeros-world-map', 'journeymap', 'appleskin', 'mouse-tweaks', 'jade'],
-    quilt: ['modmenu', 'jei', 'emi', 'xaeros-minimap', 'xaeros-world-map', 'journeymap', 'appleskin', 'mouse-tweaks', 'jade'],
-    forge: ['jei', 'emi', 'xaeros-minimap', 'xaeros-world-map', 'journeymap', 'appleskin', 'mouse-tweaks', 'jade'],
-    neoforge: ['jei', 'emi', 'xaeros-minimap', 'xaeros-world-map', 'journeymap', 'appleskin', 'mouse-tweaks', 'jade'],
+    fabric: ['modmenu', 'jei', 'emi', 'xaeros-minimap', 'xaeros-world-map', 'journeymap', 'appleskin', 'mouse-tweaks', 'jade', 'resourcify'],
+    quilt: ['modmenu', 'jei', 'emi', 'xaeros-minimap', 'xaeros-world-map', 'journeymap', 'appleskin', 'mouse-tweaks', 'jade', 'resourcify'],
+    forge: ['jei', 'emi', 'xaeros-minimap', 'xaeros-world-map', 'journeymap', 'appleskin', 'mouse-tweaks', 'jade', 'resourcify'],
+    neoforge: ['jei', 'emi', 'xaeros-minimap', 'xaeros-world-map', 'journeymap', 'appleskin', 'mouse-tweaks', 'jade', 'resourcify'],
   },
 }
 
