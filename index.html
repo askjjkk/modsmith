@@ -14,6 +14,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&family=Pixelify+Sans:wght@500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/pet.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha512-XMVd28F1oH/O71fzwBnV7HucLxVwtxf26XV8P4wPk26EDxuGZ91N8bsOttmnomcCD3CS5ZMRL50H0GgOHvegtg==" crossorigin="anonymous" referrerpolicy="no-referrer" defer></script>
 <script type="module" src="js/ui.js"></script>
 </head>
@@ -35,6 +36,15 @@
       <span class="typer" aria-hidden="true"></span>
     </div>
     <div class="chips" aria-live="polite"></div>
+    <div class="picker glass" id="theme-picker" hidden role="dialog" aria-label="Выбор тем">
+      <div class="picker-top">
+        <input id="picker-search" type="search" placeholder="Найти тему: драконы, заводы, корабли…" aria-label="Поиск темы" autocomplete="off">
+        <span class="picker-count" id="picker-count"></span>
+        <button class="picker-close" id="picker-close" type="button" aria-label="Закрыть">Готово</button>
+      </div>
+      <div class="picker-tabs" id="picker-tabs"></div>
+      <div class="picker-grid" id="picker-grid"></div>
+    </div>
 
     <div class="controls">
       <div class="control">
@@ -68,6 +78,15 @@
         <label class="lever" title="Анимации, живые звуки, падающие листья, частицы, красивые подсказки — как в топовых сборках"><input type="checkbox" id="polish" checked><span class="lever-track"><span class="lever-knob"></span></span>Атмосфера</label>
         <label class="lever" title="Дальность прорисовки 32, FPS до 260, без покачивания камеры, русский язык, тише звуки, подсказки к предметам. Можно поменять в игре."><input type="checkbox" id="comfort"><span class="lever-track"><span class="lever-knob"></span></span>Комфортные настройки игры <small class="muted-note">(на любителя)</small></label>
       </div>
+      <div class="control">
+        <span class="control-label">Графика</span>
+        <div class="gfx">
+          <label class="lever" title="Красивый свет, тени и вода. Сам поставлю мод для шейдеров (Iris или Oculus) и включу шейдер в игре. На слабом ПК выберите MakeUp."><input type="checkbox" id="shaders"><span class="lever-track"><span class="lever-knob"></span></span>Шейдеры</label>
+          <div class="select"><select id="shader-pick" aria-label="Какие шейдеры"></select></div>
+          <label class="lever" title="Ресурспаки, которые делают игру живее и ничего не ломают. Включатся в игре сами."><input type="checkbox" id="rpacks"><span class="lever-track"><span class="lever-knob"></span></span>Ресурспаки</label>
+          <div class="rp-list" id="rp-list"></div>
+        </div>
+      </div>
     </div>
 
     <button class="craft" id="craft" type="button"><span class="craft-shine" aria-hidden="true"></span><span class="craft-text">Скрафтить сборку</span></button>
@@ -92,6 +111,7 @@
       <div class="actions">
         <button class="btn btn-primary" id="dl-mrpack" type="button"><span class="btn-fill"></span><span class="btn-text">Скачать .mrpack</span></button>
         <button class="btn" id="dl-zip" type="button"><span class="btn-fill"></span><span class="btn-text">Архив с модами</span></button>
+        <button class="btn" id="dl-server" type="button" title="Архив для своего сервера: моды, которые работают на сервере, и start.bat, который сам скачает ядро сервера"><span class="btn-fill"></span><span class="btn-text">Серверная сборка</span></button>
         <button class="btn btn-ghost" id="share" type="button"><span class="btn-text">Поделиться</span></button>
       </div>
       <p class="hint empty-themes" id="empty-themes" hidden></p>
@@ -99,16 +119,26 @@
     </div>
     <div id="sections"></div>
     <details class="skipped glass" id="skipped" hidden>
-      <summary>Что я отсеял и почему</summary>
-      <ul id="skipped-list"></ul>
+      <summary>Что я отсеял и почему <small id="skipped-count"></small></summary>
+      <div id="skipped-list"></div>
     </details>
-    <section class="doctor glass" aria-labelledby="doctor-title">
-      <h2 id="doctor-title">Игра не запустилась?</h2>
-      <p>Вставьте сюда crash-report (папка <code>crash-reports</code> в профиле сборки) или текст ошибки из окна лаунчера. Я найду, какие моды виноваты, уберу их, запомню и отдам исправленную сборку.</p>
+  </section>
+
+  <section class="doctor glass" id="doctor" aria-labelledby="doctor-title">
+    <h2 id="doctor-title">Игра не запустилась?</h2>
+    <p>Перетащите сюда <code>logs/latest.log</code> или отчёт из папки <code>crash-reports</code> (они лежат в папке профиля сборки). Я найду, какой мод виноват и что с ним сделать. Работает и для сборок, собранных не здесь.</p>
+    <label class="drop" id="drop">
+      <input type="file" id="crash-file" accept=".log,.txt,text/plain" multiple>
+      <span class="drop-icon" aria-hidden="true"></span>
+      <span class="drop-text"><b>Выбрать файл</b> или перетащить сюда</span>
+      <span class="drop-name" id="drop-name"></span>
+    </label>
+    <details class="paste">
+      <summary>или вставить текст ошибки</summary>
       <textarea id="crash" rows="5" spellcheck="false" placeholder="---- Minecraft Crash Report ----&#10;…"></textarea>
-      <button class="btn" id="diagnose" type="button"><span class="btn-text">Найти виновника</span></button>
-      <div class="diag-result" id="diag-result" aria-live="polite"></div>
-    </section>
+    </details>
+    <button class="btn" id="diagnose" type="button"><span class="btn-text">Найти причину</span></button>
+    <div class="diag-result" id="diag-result" aria-live="polite"></div>
   </section>
 </main>
 
@@ -117,6 +147,13 @@
   <p><a href="https://github.com/askjjkk/modsmith" target="_blank" rel="noopener">Исходный код</a></p>
 </footer>
 
+<div class="dock" id="dock" aria-label="Скачать сборку">
+  <span class="dock-info" id="dock-info"></span>
+  <button class="btn btn-primary" type="button" data-act="mrpack"><span class="btn-text">Скачать .mrpack</span></button>
+  <button class="btn" type="button" data-act="zip"><span class="btn-text">Архив</span></button>
+  <button class="btn" type="button" data-act="server"><span class="btn-text">Сервер</span></button>
+  <button class="btn btn-ghost dock-up" type="button" data-act="up" aria-label="К сборке" title="Наверх, к сборке"><span class="btn-text">↑</span></button>
+</div>
 <datalist id="theme-list"></datalist>
 <div class="toast" id="toast" role="status"></div>
 </body>

@@ -1,14 +1,19 @@
 """Массовая проверка запуском: для каждой сборки из tools/out/packs/*.json запускает сервер Fabric,
 находит упавшие моды, убирает их и повторяет, пока сервер не стартует. Итог: tools/out/mass_result.json.
 
-Запуск: py tools/mass_check.py РАБОЧАЯ_ПАПКА
-EULA не принимается: сервер гасится, как только дошёл до неё (моды к этому моменту уже запущены).
+Запуск: py tools/mass_check.py РАБОЧАЯ_ПАПКА [папка_со_сборками]
+Сервер создаёт мир целиком (пользователь разрешил ставить eula=true в тестовых серверах, 24.10):
+так ловятся и падения при запуске, и зависания генерации мира на 0%.
 """
 import hashlib
 import json
+import queue
 import re
+import shutil
 import subprocess
 import sys
+import threading
+import time
 import urllib.request
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
@@ -19,6 +24,18 @@ UA = {"User-Agent": "modsmith-mass-check"}
 PLATFORM = {"minecraft", "java", "fabricloader", "fabric_loader", "mixinextras", "fabric", "fabric_api"}
 IGNORE_PKG = {"net", "com", "org", "io", "dev", "me", "java", "knot", "minecraft", "fabricmc", "impl", "api", "common",
               "client", "server", "mixin", "core", "util", "github", "spongepowered", "loader", "main", "mod"}
+
+
+def real_java() -> str:
+    """«java» из PATH у Oracle — прослойка, которая запускает настоящую Java отдельным процессом.
+    Берём настоящую: тогда номер процесса — сам сервер (его можно погасить и снять снимок потоков)."""
+    out = subprocess.run(["java", "-XshowSettings:properties", "-version"], capture_output=True, text=True).stderr
+    home = re.search(r"java\.home = (.+)", out)
+    exe = Path(home.group(1).strip()) / "bin" / "java.exe" if home else None
+    return str(exe) if exe and exe.exists() else "java"
+
+
+JAVA = real_java()
 
 
 def norm(s: str) -> str:
@@ -63,9 +80,10 @@ def jar_info(path: Path) -> dict:
     return {"ids": [norm(path.stem)], "depends": [], "name": path.stem}
 
 
-# Сервер дошёл до чтения своих настроек: код запуска всех модов к этому моменту уже выполнен.
-# Дальше без принятой EULA некоторые моды (owo-lib) падают — это не ошибка сборки.
-SUCCESS = ("You need to agree to the EULA", "Done (", "Failed to load properties from file: server.properties")
+# Мир создан и сервер готов принимать игроков
+SUCCESS = ("Done (",)
+# Сколько ждать создания мира; дольше — считаем, что генерация зависла
+WORLD_TIMEOUT = 420
 
 
 def started(log: str) -> bool:
@@ -110,27 +128,68 @@ def prepare_server(work_root: Path, mc: str, deps: dict, cache: dict) -> tuple:
 
 
 def run_server(work: Path, args: list) -> str:
+    # свежий мир на каждую попытку, EULA принята (разрешение пользователя), сторожевой таймер сервера выключен:
+    # медленную генерацию с модами он иначе принимает за зависание
+    shutil.rmtree(work / "world", ignore_errors=True)
+    (work / "eula.txt").write_text("eula=true\n", encoding="utf-8")
+    # свой порт на каждый запуск: прошлый сервер мог ещё не отпустить свой
+    port = 30000 + int(time.time() * 1000) % 20000
+    (work / "server.properties").write_text(f"level-seed=modsmith\nmax-tick-time=-1\nonline-mode=false\nserver-port={port}\n",
+                                            encoding="utf-8")
     # headless: окна-«сторожа» модов (owo-sentinel и т.п.) не откроются и не повесят проверку
-    proc = subprocess.Popen(["java", "-Djava.awt.headless=true", "-Xmx6G", *args], cwd=work,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                            errors="replace")
+    proc = subprocess.Popen([JAVA, "-Djava.awt.headless=true", "-Xmx6G", *args], cwd=work,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.PIPE, text=True,
+                            encoding="utf-8", errors="replace")
+    lines_q: queue.Queue = queue.Queue()
+    threading.Thread(target=lambda: [lines_q.put(l) for l in proc.stdout] + [lines_q.put(None)], daemon=True).start()
     lines = []
+    deadline = time.time() + WORLD_TIMEOUT
     try:
-        for line in proc.stdout:
+        while True:
+            try:
+                line = lines_q.get(timeout=max(0.1, deadline - time.time()))
+            except queue.Empty:
+                # мир не создался за отведённое время: снимок потоков покажет, на каком моде всё встало
+                lines.append(f"MODSMITH-HANG: мир не создался за {WORLD_TIMEOUT} с")
+                dump = subprocess.run([str(Path(JAVA).with_name("jcmd.exe")), str(proc.pid), "Thread.print"], capture_output=True, text=True,
+                                      encoding="utf-8", errors="replace", timeout=60).stdout
+                (work / "hang-threads.txt").write_text(dump, encoding="utf-8")
+                lines.append(dump)
+                break
+            if line is None:
+                break
             lines.append(line.rstrip())
             if any(s in line for s in SUCCESS):
                 break
+            saved = re.search(r"crash report has been saved to: (.+\.txt)", line)
+            if saved:
+                # сервер упал при создании мира: причина — в файле отчёта
+                try:
+                    lines.append(Path(saved.group(1).strip()).read_text(encoding="utf-8", errors="replace"))
+                except OSError:
+                    pass
+                break
             if "Could not execute entrypoint" in line or "Incompatible mods found" in line or "Crash Report" in line \
                     or "Mixin apply failed" in line or "MixinApplyError" in line:
-                for _ in range(120):
-                    nxt = proc.stdout.readline()
-                    if not nxt:
+                end = time.time() + 15
+                while time.time() < end:
+                    try:
+                        nxt = lines_q.get(timeout=1)
+                    except queue.Empty:
+                        continue
+                    if nxt is None:
                         break
                     lines.append(nxt.rstrip())
                 break
     finally:
-        proc.kill()
+        # на всякий случай гасим всё дерево процессов: иначе сервер остаётся висеть и держит порт
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True)
+        proc.wait(timeout=30)
     return "\n".join(lines)
+
+
+def hung(log: str) -> bool:
+    return "MODSMITH-HANG" in log
 
 
 def culprits(log: str, by_id: dict, files_by_name: dict = None) -> dict:
@@ -147,6 +206,17 @@ def culprits(log: str, by_id: dict, files_by_name: dict = None) -> dict:
         add(m.group(1), "упал при запуске")
     for m in re.finditer(r"provided by '([^']+)'", log):
         add(m.group(1), "упал при запуске")
+    # «- Fog (fog) has failed to load correctly … for invalid dist DEDICATED_SERVER» — мод только для игры, не для сервера
+    for m in re.finditer(r"^\s*- .+? \(([a-z0-9_\-]+)\) has failed to load correctly\s*\n\s*(.+)", log, re.M):
+        add(m.group(1), "КЛИЕНТСКИЙ: на сервере не работает (в игре он нужен)" if "invalid dist" in m.group(2) else "упал при запуске")
+    # NeoForge/Forge: мод не смог создаться или подписаться на события (часто — не та версия основного мода)
+    for m in re.finditer(r"(?:Failed to create mod instance|Failed to register automatic subscribers)\. ModID: ([a-z0-9_\-]+)", log):
+        add(m.group(1), "упал при запуске (не та версия основного мода или нет библиотеки)")
+    # Forge: два мода несут одну и ту же библиотеку внутри себя
+    for m in re.finditer(r"Modules (\S+) and (\S+) export package", log):
+        for mod in (m.group(1), m.group(2)):
+            if norm(mod) != "mixinextras":
+                add(mod, "везёт внутри копию библиотеки, которая уже есть (дубль пакетов)")
     # Forge/NeoForge: «Mod ID: 'x', Requested by: 'y'» и «Mod y requires x»
     for m in re.finditer(r"Requested by: '([^']+)'", log):
         add(m.group(1), "нет обязательной зависимости")
@@ -182,6 +252,24 @@ def culprits(log: str, by_id: dict, files_by_name: dict = None) -> dict:
                 searching = False
                 break
     return found
+
+
+def hang_suspects(log: str, by_id: dict) -> list:
+    """Какие моды встречаются в стеках потоков сервера и генерации мира во время зависания."""
+    seen = {}
+    block_ok = False
+    for line in log.splitlines():
+        if line.startswith('"'):
+            block_ok = any(k in line for k in ("Server thread", "Worker-Main", "c2me", "Chunk", "worldgen", "Light"))
+            continue
+        m = re.match(r"^\s*at (?:[\w.]+/)*([a-zA-Z_][\w.$]+)\(", line) if block_ok else None
+        if not m:
+            continue
+        for seg in m.group(1).split(".")[:-1]:
+            n = norm(seg)
+            if len(n) > 2 and n not in IGNORE_PKG and n in by_id:
+                seen[by_id[n]] = seen.get(by_id[n], 0) + 1
+    return sorted(seen, key=seen.get, reverse=True)[:8]
 
 
 def check_pack(index_path: Path, work_root: Path, server_jars: dict) -> dict:
@@ -221,6 +309,9 @@ def check_pack(index_path: Path, work_root: Path, server_jars: dict) -> dict:
         (work_root / f"{index_path.stem}-try{attempt}.log").write_text(log, encoding="utf-8")
         if started(log):
             return {"pack": index_path.stem, "ok": True, "attempts": attempt + 1, "mods": len(infos), "removed": removed}
+        if hung(log):
+            return {"pack": index_path.stem, "ok": False, "hang": True, "attempts": attempt + 1, "mods": len(infos),
+                    "removed": removed, "suspects": hang_suspects(log, by_id)}
         bad = culprits(log, by_id, {name: info['ids'] for name, info in infos.items()})
         if not bad:
             return {"pack": index_path.stem, "ok": False, "attempts": attempt + 1, "mods": len(infos), "removed": removed,

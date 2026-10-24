@@ -191,7 +191,7 @@ export const MORE_THEMES = [
   T('aztec', 'Ацтеки и майя', '#ffb300', ['ацтек', 'майя', '=инки', 'aztec', 'maya', 'inca'], ['aztec', 'mayan'], []),
   T('arabian', 'Арабские сказки', '#ffca28', ['арабск', '=джин', 'восточн', 'arabian', 'genie', 'oriental'], ['arabian', 'desert'], []),
   T('prehistoric', 'Доисторическое', '#8d6e63', ['доистор', 'пещерн человек', 'мамонт', 'prehistoric', 'mammoth', 'caveman'], ['prehistoric', 'mammoth'], []),
-  T('industrial', 'Индустриальная эпоха', '#795548', ['индустриальн', 'фабрик', 'заводск', 'industrial', 'industry'], ['industrial'], ['technology']),
+  T('industrial', 'Индустриальная эпоха', '#795548', ['индустриальн', 'фабрика', 'фабрики', 'заводск', 'industrial', 'industry'], ['industrial'], ['technology']),
   T('medieval_life', 'Средневековая жизнь', '#a1887f', ['средневеков жизн', 'крестьян', 'феодал', 'peasant', 'feudal'], ['medieval life'], []),
   T('kingdoms', 'Королевства и политика', '#ffd54f', ['королевств', 'корол', 'империя', 'королев', 'kingdom', 'king', 'empire'], ['kingdoms', 'empire'], []),
   T('war', 'Войны и армии', '#c62828', ['война', 'войны', 'битва армий', 'сражени армий', '=war', 'warfare', 'battle'], ['war', 'armies'], []),

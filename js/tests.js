@@ -2,11 +2,12 @@
 import { THEME_BY_ID, analyze, parse, detectThemes, detectVersion, detectLoader } from './parser.js'
 import { REFERENCES } from './references.js'
 import { THEMES } from './themes.js'
-import { diagnose, findCulprits } from './doctor.js'
+import { diagnose, examineLog, findCulprits, modsFromLog } from './doctor.js'
 import { INTENTS } from './intents.js'
 import { COMFORT_OPTIONS } from './comfort-options.js'
-import { PackBuilder, buildPack, groupOf, majorMinor, missingBase, pickVersion } from './builder.js'
-import { buildIndex, mrpackBlob } from './mrpack.js'
+import { PackBuilder, buildPack, groupOf, libVersion, majorMinor, missingBase, pickVersion } from './builder.js'
+import { buildIndex, mrpackBlob, serverScripts } from './mrpack.js'
+import { detectGraphics, graphicsConfigs } from './graphics.js'
 import { isPlatform, nestedIds, parseFabric, parseToml } from './jarmeta.js'
 
 const results = []
@@ -231,6 +232,160 @@ test('мод, отставший от своей библиотеки, убир�
   await b.verifyJars()
   eq(b.mods().map(m => m.project.id).sort(), ['se', 'wiz'])
   eq(b.skipped.find(s => s.title === 'RPG Minibosses').why.includes('1.8'), true)
+})
+
+test('библиотека нужна только одному моду: ставится её подходящая старая версия, мод остаётся', async () => {
+  const ver = (id, number, date) => ({ id: `v-${id}-${number}`, version_number: number, version_type: 'release', date_published: date, dependencies: [],
+    files: [{ primary: true, url: `https://cdn/${id}-${number}.jar`, filename: `${id}-${number}.jar`, size: 10, hashes: { sha1: 'a', sha512: 'b' } }] })
+  const versions = {
+    bp: [ver('bp', '8.2.1', '2026-09-01'), ver('bp', '8.0.4', '2025-06-01')],
+    bees: [ver('bees', '7.0.0', '2025-07-01')],
+  }
+  const api = fakeApi({ projects: {}, versions, search: {} })
+  const meta = url => url.includes('/bp-') ? { ids: ['blueprint'], depends: [], nested: [] } : { ids: ['buzzier_bees'], depends: ['blueprint'], nested: [] }
+  const b = new PackBuilder(api, { version: '1.21.1', loader: 'neoforge' }, { readMeta: async url => meta(url) })
+  await b.tryAdd(P('bp', { title: 'Blueprint' }), { id: 'deps' }, '', { allowLibrary: true })
+  await b.tryAdd(P('bees', { title: 'Buzzier Bees' }), { id: 'bees' }, '')
+  await b.verifyJars()
+  eq(b.mods().map(m => m.project.id).sort(), ['bees', 'bp'])
+  eq(b.chosen.get('bp').version.number, '8.0.4')
+})
+test('выбор версии: файл под чужую версию игры не берётся', () => {
+  const v = (id, filename, type = 'release') => ({ id, version_type: type, files: [{ primary: true, filename }] })
+  eq(pickVersion([v('new', 'getittogetherdrops-neoforge-1.21.5-1.4.jar'), v('old', 'getittogetherdrops-neoforge-1.21-1.3.2.jar')], '1.21.1').id, 'old')
+  eq(pickVersion([v('a', 'Structory_Towers_26.2_v1.0.17.jar'), v('b', 'Structory_Towers_1.21.x_v1.0.15.jar')], '1.21.1').id, 'b')
+  eq(pickVersion([v('x', 'xaerominimap-neoforge-1.21.1-26.6.0.jar')], '1.21.1').id, 'x')
+  eq(pickVersion([v('al', 'c2me-0.4.0-alpha.jar', 'alpha')], '1.21.1', { noAlpha: true }), null)
+})
+test('группы: один мод на биомы, одна замена постройки', () => {
+  eq(groupOf({ slug: 'terralith', title: 'Terralith' }), groupOf({ slug: 'biomes-o-plenty', title: "Biomes O' Plenty" }))
+  eq(groupOf({ slug: 'yungs-better-desert-temples', title: "YUNG's Better Desert Temples" }),
+    groupOf({ slug: 'dungeons-and-taverns-desert-temple-overhaul', title: 'Dungeons and Taverns Desert Temple Overhaul' }))
+  eq(groupOf({ slug: 'dungeons-and-taverns', title: 'Dungeons and Taverns' }), null)
+})
+test('проверка файла: версия игры и загрузчик из jar', () => {
+  const b = new PackBuilder(fakeApi({ projects: {}, versions: {}, search: {} }), { version: '1.21.1', loader: 'neoforge' })
+  eq(b.fileProblem({ kind: 'neoforge', mc: '[1.21,1.22)', mcKind: 'maven', hasModLoader: true }), null)
+  eq(!!b.fileProblem({ kind: 'neoforge', mc: '[1.21.4,)', mcKind: 'maven', hasModLoader: true }), true)
+  eq(!!b.fileProblem({ kind: 'fabric', mc: '>=1.21', mcKind: 'fabric' }), true)
+  eq(!!b.fileProblem({ kind: 'neoforge', mc: '[1.21,)', mcKind: 'maven', hasModLoader: false }), true)
+})
+test('два мода с одинаковым встраиванием (Lithium и Radium): второй убирается', async () => {
+  const ver = id => ({ id: `v-${id}`, version_number: '1.0', version_type: 'release', date_published: '2026-01-01', dependencies: [],
+    files: [{ primary: true, url: `https://cdn/${id}.jar`, filename: `${id}.jar`, size: 10, hashes: { sha1: 'a', sha512: 'b' } }] })
+  const api = fakeApi({ projects: {}, versions: { li: [ver('li')], ra: [ver('ra')] }, search: {} })
+  const metas = {
+    'https://cdn/li.jar': { ids: ['lithium'], depends: [], nested: [], mixins: ['lithium.mixins.json'] },
+    'https://cdn/ra.jar': { ids: ['radium'], depends: [], nested: [], mixins: ['lithium.mixins.json'] },
+  }
+  const b = new PackBuilder(api, { version: '1.21.1', loader: 'neoforge' }, { readMeta: async url => metas[url] || null })
+  await b.tryAdd(P('li', { title: 'Lithium' }), { id: 'perf' }, '')
+  await b.tryAdd(P('ra', { title: 'Radium Reforged', slug: 'radium-x' }), { id: 'perf' }, '')
+  await b.verifyJars()
+  eq(b.mods().map(m => m.project.id), ['li'])
+})
+
+test('доктор без сборки: читает список модов и ошибки прямо из latest.log NeoForge', () => {
+  const log = [
+    '[05:12:50] [main/INFO] [net.neoforged.fml.loading.moddiscovery.ModDiscoverer/SCAN]: ',
+    '\tMod List:',
+    '\t\tName Version (Mod Id)',
+    '',
+    '\t\tLithium 0.15.4+mc1.21.1 (lithium)',
+    '\t\tRadium Reforged 0.13.1 (radium)',
+    '\t\tC2ME 0.4.0-alpha (c2me)',
+    '\t\tScalableLux 0.1.0.1 (scalablelux)',
+    '\t\tLog Begone 1.0.3 (logbegone)',
+    '--fml.mcVersion, 1.21.1',
+    'File mods\\Structory_Towers_26.2_v1.0.17.jar is not a valid mod file',
+    'Failed to create mod instance. ModID: aw_npc, class NPCs.Main',
+    'java.lang.NoClassDefFoundError: ARLib/network/SimpleNetworkPacket$SimpleNetworkDataReceiver',
+    'Exception in thread "main" java.lang.IllegalArgumentException: Decoration with key \'fabric-modId\' already exists on config lithium.mixins.json',
+    'Cowardly refusing to send event to a broken mod state',
+  ].join('\n')
+  const r = examineLog(log)
+  eq(r.mc, '1.21.1')
+  eq(modsFromLog(log).some(m => m.id === 'radium'), true)
+  eq(r.problems.some(p => p.files.includes('Structory_Towers_26.2_v1.0.17.jar')), true)
+  eq(r.problems.some(p => p.ids.includes('aw_npc') && p.why.includes('ARLib')), true)
+  eq(r.problems.some(p => p.why.includes('lithium.mixins.json')), true)
+  eq(r.hints.some(h => h.includes('Radium')), true)
+  eq(r.hints.some(h => h.includes('C2ME')), true)
+  eq(r.hints.some(h => h.includes('Log Begone')), true)
+  eq(r.hints.some(h => h.includes('broken mod state')), true)
+})
+test('доктор со сборкой: дубль Lithium в логе -> убрать Radium из сборки', () => {
+  const mods = [
+    { project: { id: 'L', slug: 'lithium', title: 'Lithium' }, ids: ['lithium'], depends: [] },
+    { project: { id: 'R', slug: 'radium', title: 'Radium Reforged' }, ids: ['radium'], depends: [] },
+  ]
+  const r = diagnose("Decoration with key 'fabric-modId' already exists on config lithium.mixins.json", mods)
+  eq(r.culprits.map(c => c.mod.project.id), ['R'])
+})
+
+test('номер версии библиотеки без версии игры', () => {
+  eq(libVersion('1.21-3.2.8.5', '1.21.1'), '3.2.8.5')
+  eq(libVersion('mc1.21.1-0.8.13-fabric', '1.21.1'), '0.8.13')
+  eq(libVersion('1.26.10.3', '1.21.1'), '1.26.10.3')
+  eq(libVersion('1.20.1-2.2.0', '1.20.1'), '2.2.0')
+  eq(libVersion('1.10.9+1.21.1-fabric', '1.21.1'), '1.10.9')
+  eq(libVersion('21.1.65', '1.21.1'), '21.1.65')
+})
+test('несовместим только со старой версией: второй мод обновляется, а не убирается (Sodium и Iris)', async () => {
+  const ver = (id, number, type = 'release') => ({ id: `v-${id}-${number}`, version_number: number, version_type: type, date_published: '2026-01-01', dependencies: [],
+    files: [{ primary: true, url: `https://cdn/${id}-${number}.jar`, filename: `${id}-${number}.jar`, size: 10, hashes: { sha1: 'a', sha512: 'b' } }] })
+  const api = fakeApi({ projects: {}, versions: { so: [ver('so', '0.8.13')], ir: [ver('ir', '1.8.13', 'beta'), ver('ir', '1.8.8')] }, search: {} })
+  const meta = url => url.includes('/so-') ? { ids: ['sodium'], depends: [], nested: [], mcKind: 'fabric', breaks: { iris: '<1.8.13' } } : { ids: ['iris'], depends: [], nested: [] }
+  const b = new PackBuilder(api, { version: '1.21.1', loader: 'fabric' }, { readMeta: async url => meta(url) })
+  await b.tryAdd(P('so', { title: 'Sodium' }), { id: 'perf' }, '')
+  await b.tryAdd(P('ir', { title: 'Iris' }), { id: 'perf' }, '')
+  eq(b.chosen.get('ir').version.number, '1.8.8')
+  await b.verifyJars()
+  eq(b.mods().map(m => m.project.id).sort(), ['ir', 'so'])
+  eq(b.chosen.get('ir').version.number, '1.8.13')
+})
+
+test('графика: понимает «с шейдерами» и «слабый пк», включает шейдер и ресурспаки в настройках', () => {
+  eq(detectGraphics('магия с шейдерами для слабого пк'), { shaders: true, packs: true && false, power: 'potato' })
+  eq(detectGraphics('красивая графика и текстурпаки').packs, true)
+  eq(detectGraphics('магия и драконы').shaders, false)
+  const extras = [
+    { kind: 'shader', file: { filename: 'ComplementaryReimagined_r5.9.3.zip' } },
+    { kind: 'resourcepack', file: { filename: 'FreshAnimations_v1.9.zip' } },
+  ]
+  const neo = graphicsConfigs(extras, 'neoforge', null)
+  eq(neo['config/iris.properties'], 'enableShaders=true\nshaderPack=ComplementaryReimagined_r5.9.3.zip\n')
+  eq(neo['options.txt'], 'resourcePacks:["vanilla","file/FreshAnimations_v1.9.zip"]\n')
+  eq(!!graphicsConfigs(extras, 'forge', null)['config/oculus.properties'], true)
+  const merged = graphicsConfigs(extras, 'fabric', 'lang:ru_ru\nresourcePacks:["vanilla"]\n')['options.txt']
+  eq(merged.includes('lang:ru_ru') && merged.includes('file/FreshAnimations_v1.9.zip'), true)
+})
+test('серверная сборка: start.bat скачивает ядро под загрузчик', () => {
+  const mods = Array.from({ length: 70 }, () => ({}))
+  const fab = serverScripts({ loader: 'fabric', version: '1.21.1', loaderVersion: '0.16.14', mods }, '1.0.1').bat
+  eq(fab.includes('meta.fabricmc.net/v2/versions/loader/1.21.1/0.16.14/1.0.1/server/jar') && fab.includes('-Xmx6G'), true)
+  const neo = serverScripts({ loader: 'neoforge', version: '1.21.1', loaderVersion: '21.1.264', mods }).bat
+  eq(neo.includes('neoforge-21.1.264-installer.jar') && neo.includes('--installServer') && neo.includes('run.bat'), true)
+  const forge = serverScripts({ loader: 'forge', version: '1.20.1', loaderVersion: '47.4.28', mods }).sh
+  eq(forge.includes('forge-1.20.1-47.4.28-installer.jar'), true)
+})
+test('индекс .mrpack: шейдер и ресурспак только для игры, не для сервера', () => {
+  const extras = [{ path: 'shaderpacks/x.zip', file: { url: 'https://cdn/x.zip', size: 5, hashes: { sha1: 'a', sha512: 'b' } } }]
+  const idx = buildIndex({ name: 'X', summary: 's', version: '1.21.1', loader: 'fabric', loaderVersion: '0.16.0', mods: [], extras })
+  eq(idx.files[0].path, 'shaderpacks/x.zip')
+  eq(idx.files[0].env, { client: 'required', server: 'unsupported' })
+})
+
+test('словарь: слова без своей темы ищутся по переводу, «без …» исключает', () => {
+  const a = analyze('уютная деревня с лисами')
+  eq(a.themes.some(t => t.via === 'поиск' && t.theme.queries[0] === 'fox'), true)
+  const b = analyze('выживание без скорпионов')
+  eq(b.excluded.some(t => t.queries?.[0] === 'scorpion'), true)
+  eq(analyze('helicopters').themes.length > 0, true)
+  // служебные и опасные слова не превращаются в темы
+  eq(analyze('классная сборка').themes.some(t => t.via === 'поиск'), false)
+  eq(analyze('жёсткая сборка').themes.some(t => t.via === 'поиск'), false)
+  eq(analyze('магия на фабрике').themes.some(t => t.theme.id === 'industrial'), false)
 })
 
 // --- понимание запроса v2 ---

@@ -3,12 +3,14 @@ import { ApiError, createApi } from './modrinth.js'
 import { THEME_BY_ID, parse } from './parser.js'
 import { THEMES } from './themes.js'
 import { addBlocked, allBlocked } from './broken.js'
-import { diagnose } from './doctor.js'
+import { diagnose, ramFor } from './doctor.js'
 import { COMFORT_OPTIONS } from './comfort-options.js'
 import { buildPack } from './builder.js'
-import { LOADER_NAMES, buildIndex, modsZipBlob, mrpackBlob } from './mrpack.js'
+import { LOADER_NAMES, buildIndex, modsZipBlob, mrpackBlob, serverZipBlob } from './mrpack.js'
+import { DEFAULT_SHADER, RESOURCE_PACKS, SHADERS, detectGraphics, graphicsConfigs, shaderFor } from './graphics.js'
 import { startSky } from './bg.js'
 import { makeTextures } from './textures.js'
+import { startPet } from './pet.js'
 
 const $ = s => document.querySelector(s)
 const api = createApi()
@@ -202,6 +204,7 @@ function renderChips() {
     box.append(hint)
   }
   if (text.length > 2) box.append(addThemeControl())
+  renderPicker()
   const refs = lastParse.references.filter(r => !r.negative).map(x => x.label)
   const understood = [...refs, ...(lastParse.intents || [])]
   const typos = themes.filter(x => x.via === 'опечатка').map(x => `«${x.word}» → ${x.theme.label}`)
@@ -217,21 +220,96 @@ function renderChips() {
   }
 }
 
-// «+ тема»: выбрать любую из 320+ тем вручную
+// «+ тема»: окно со всеми темами. Нажал — тема добавилась, окно осталось на месте
 function addThemeControl() {
-  const wrap = document.createElement('span')
-  wrap.className = 'chip-add'
-  const input = document.createElement('input')
-  input.setAttribute('list', 'theme-list')
-  input.placeholder = '+ добавить тему'
-  input.setAttribute('aria-label', 'Добавить тему')
-  input.addEventListener('change', () => {
-    const theme = THEMES.find(t => t.label.toLowerCase() === input.value.trim().toLowerCase())
-    if (theme) { manual.set(theme.id, 'in'); renderChips() }
-    input.value = ''
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'chip chip-add'
+  btn.style.setProperty('--c', '#b77bff')
+  btn.textContent = '+ добавить тему'
+  btn.setAttribute('aria-expanded', String(!$('#theme-picker').hidden))
+  btn.addEventListener('click', () => toggleThemePicker())
+  return btn
+}
+
+// Русские названия категорий Modrinth — разделы в окне выбора тем
+const THEME_GROUPS = [
+  ['adventure', 'Приключения'], ['magic', 'Магия'], ['technology', 'Техника'], ['worldgen', 'Мир и биомы'],
+  ['mobs', 'Мобы и существа'], ['decoration', 'Стройка и декор'], ['food', 'Еда и фермы'], ['equipment', 'Оружие и броня'],
+  ['game-mechanics', 'Механики'], ['transportation', 'Транспорт'], ['storage', 'Хранение'], ['economy', 'Экономика'],
+  ['social', 'С друзьями'], ['utility', 'Удобства'], ['optimization', 'Оптимизация'], ['minigame', 'Мини-игры'],
+]
+let pickerGroup = 'all'
+
+function themeGroupOf(t) {
+  const cat = (t.categories || []).find(c => THEME_GROUPS.some(([id]) => id === c))
+  return cat || 'other'
+}
+
+function initThemePicker() {
+  const panel = $('#theme-picker')
+  const tabs = $('#picker-tabs')
+  for (const [id, label] of [['all', 'Все'], ['chosen', 'Выбранные'], ...THEME_GROUPS, ['other', 'Другое']]) {
+    if (!['all', 'chosen', 'other'].includes(id) && !THEMES.some(t => themeGroupOf(t) === id)) continue
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.dataset.group = id
+    b.textContent = label
+    b.addEventListener('click', () => { pickerGroup = id; renderPicker() })
+    tabs.append(b)
+  }
+  $('#picker-search').addEventListener('input', renderPicker)
+  $('#picker-close').addEventListener('click', () => toggleThemePicker(false))
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !panel.hidden) toggleThemePicker(false) })
+  document.addEventListener('pointerdown', e => {
+    if (!panel.hidden && !panel.contains(e.target) && !e.target.closest('.chip-add')) toggleThemePicker(false)
   })
-  wrap.append(input)
-  return wrap
+}
+
+function toggleThemePicker(force) {
+  const panel = $('#theme-picker')
+  const open = force ?? panel.hidden
+  panel.hidden = !open
+  document.querySelector('.chip-add')?.setAttribute('aria-expanded', String(open))
+  if (open) { renderPicker(); $('#picker-search').focus({ preventScroll: true }) }
+}
+
+function renderPicker() {
+  const panel = $('#theme-picker')
+  if (panel.hidden) return
+  const q = $('#picker-search').value.trim().toLowerCase()
+  const { themes, excluded } = effective()
+  const on = new Set(themes.map(t => t.theme.id))
+  const off = new Set(excluded.map(t => t.id))
+  for (const b of $('#picker-tabs').children) b.classList.toggle('active', b.dataset.group === pickerGroup)
+  const grid = $('#picker-grid')
+  const keep = grid.scrollTop
+  grid.textContent = ''
+  const list = THEMES
+    .filter(t => (q ? t.label.toLowerCase().includes(q) || t.stems.some(s => s.replace('=', '').startsWith(q)) : true))
+    .filter(t => q || pickerGroup === 'all' || (pickerGroup === 'chosen' ? on.has(t.id) || off.has(t.id) : themeGroupOf(t) === pickerGroup))
+    .sort((a, b) => a.label.localeCompare(b.label, 'ru'))
+  for (const t of list) {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.className = `pick${on.has(t.id) ? ' on' : ''}${off.has(t.id) ? ' no' : ''}`
+    b.style.setProperty('--c', t.color)
+    b.append(document.createElement('i'), t.label)
+    b.addEventListener('click', () => {
+      // клик: добавить → убрать; запрещённую тему клик возвращает в «можно»
+      manual.set(t.id, on.has(t.id) ? 'off' : 'in')
+      renderChips()
+    })
+    grid.append(b)
+  }
+  if (!list.length) {
+    const p = document.createElement('p')
+    p.className = 'muted-note'
+    p.textContent = 'Такой темы нет. Просто напишите это словами в описании — я поищу моды по смыслу.'
+    grid.append(p)
+  }
+  $('#picker-count').textContent = `${on.size} выбрано`
+  grid.scrollTop = keep
 }
 
 let parseTimer
@@ -248,7 +326,47 @@ function onInput() {
     // «для слабого пк», «только оптимизация» включают оптимизацию
     if (p.settings?.perf && !$('#perf').checked) { $('#perf').checked = true }
     if (p.settings?.qol && !$('#qol').checked) { $('#qol').checked = true }
+    // «с шейдерами», «красивая графика», «текстурпаки» включают графику; «для слабого пк» — лёгкий шейдер
+    const g = detectGraphics(text)
+    if (g.shaders && !$('#shaders').checked) { $('#shaders').checked = true; syncGfx() }
+    if (g.packs && !$('#rpacks').checked) { $('#rpacks').checked = true; syncGfx() }
+    if (g.power && !manualShader) $('#shader-pick').value = shaderFor(g.power)
   }, 120)
+}
+
+// ---------- графика ----------
+let manualShader = false
+function graphicsChoice() {
+  return {
+    shader: $('#shaders').checked ? $('#shader-pick').value : null,
+    packs: $('#rpacks').checked ? [...document.querySelectorAll('#rp-list input:checked')].map(i => i.value) : [],
+  }
+}
+
+function syncGfx() {
+  $('#shader-pick').closest('.select').classList.toggle('dim', !$('#shaders').checked)
+  $('#rp-list').classList.toggle('dim', !$('#rpacks').checked)
+}
+
+function initGfx() {
+  const sel = $('#shader-pick')
+  for (const sh of SHADERS) sel.append(new Option(sh.label, sh.slug, false, sh.slug === DEFAULT_SHADER))
+  sel.addEventListener('change', () => { manualShader = true; if (!$('#shaders').checked) { $('#shaders').checked = true; syncGfx() } })
+  const list = $('#rp-list')
+  for (const rp of RESOURCE_PACKS) {
+    const label = document.createElement('label')
+    label.className = 'rp'
+    const box = document.createElement('input')
+    box.type = 'checkbox'
+    box.value = rp.slug
+    box.checked = rp.on
+    box.addEventListener('change', () => { if (box.checked && !$('#rpacks').checked) { $('#rpacks').checked = true; syncGfx() } })
+    label.append(box, rp.label)
+    list.append(label)
+  }
+  $('#shaders').addEventListener('change', syncGfx)
+  $('#rpacks').addEventListener('change', syncGfx)
+  syncGfx()
 }
 
 // ---------- сборка ----------
@@ -286,6 +404,7 @@ async function craft() {
   btn.disabled = true
   btn.querySelector('.craft-text').textContent = 'Крафтим…'
   $('#result').hidden = true
+  updateDock()
   const crafting = $('#crafting')
   crafting.hidden = false
   resetCrafting()
@@ -319,6 +438,7 @@ async function craft() {
     version: $('#version').value, loader: state.loader, size: state.size,
     perf: $('#perf').checked, qol: $('#qol').checked, polish: $('#polish').checked, themes, excluded, blocked: allBlocked(),
     onlyBase: !!lastParse.settings?.onlyBase && !manual.size,
+    graphics: graphicsChoice(),
   }
   try {
     const pack = await buildPack(opts, api, emit)
@@ -371,6 +491,7 @@ function renderStats() {
     [mods.length, '', 'модов'],
     [deps, '', 'из них зависимостей'],
     [Math.round(mb * 10) / 10, '', 'МБ скачать'],
+    [ramFor(mods.length), ' ГБ', 'памяти выделить игре'],
   ]
   for (const [num, suffix, label] of items) {
     const s = document.createElement('div')
@@ -390,6 +511,7 @@ function renderStats() {
   span.textContent = `${LOADER_NAMES[pack.loader]} ${pack.loaderVersion || ''}`.trim()
   v.append(b, span)
   box.append(v)
+  renderDockInfo()
 }
 
 function card(mod, index) {
@@ -468,42 +590,108 @@ function showResult(pack) {
 
   const order = []
   for (const m of pack.mods) if (!order.some(s => s.id === m.section.id)) order.push(m.section)
-  order.sort((a, b) => (a.id === 'deps') - (b.id === 'deps'))
+  // сначала то, что просили (темы), потом база (оптимизация, удобства, атмосфера), библиотеки — в самом конце
+  const rank = s => (s.id === 'deps' ? 2 : ['perf', 'qol', 'polish', 'gfx'].includes(s.id) ? 1 : 0)
+  order.sort((a, b) => rank(a) - rank(b))
   const box = $('#sections')
   box.textContent = ''
-  const io = new IntersectionObserver(entries => {
-    for (const e of entries) if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target) }
-  }, { rootMargin: '0px 0px -40px 0px' })
-  for (const section of order) {
-    const mods = pack.mods.filter(m => m.section.id === section.id)
-    const head = document.createElement('h2')
-    head.className = 'section-head'
-    head.style.setProperty('--c', section.color)
-    const small = document.createElement('small')
-    small.textContent = String(mods.length)
-    head.append(document.createElement('i'), section.label, small)
+  order.forEach((section, i) => box.append(sectionTile(section, pack.mods.filter(m => m.section.id === section.id), i)))
+  renderSkipped(pack.skipped)
+  const result = $('#result')
+  result.hidden = false
+  result.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' })
+}
+
+// Раздел сборки: компактная плитка (иконки, сколько модов, примеры), по клику раскрываются карточки
+function sectionTile(section, mods, index) {
+  const det = document.createElement('details')
+  det.className = 'sec'
+  det.style.setProperty('--c', section.color)
+  det.style.animationDelay = `${Math.min(index * 60, 600)}ms`
+  const sum = document.createElement('summary')
+  const icons = document.createElement('span')
+  icons.className = 'sec-icons'
+  for (const m of mods.filter(x => x.project.icon).slice(0, 5)) {
+    const img = new Image()
+    img.alt = ''
+    img.loading = 'lazy'
+    img.src = m.project.icon
+    icons.append(img)
+  }
+  const title = document.createElement('span')
+  title.className = 'sec-title'
+  const name = document.createElement('b')
+  name.textContent = section.label
+  const sample = document.createElement('small')
+  const names = mods.slice(0, 3).map(m => m.project.title)
+  sample.textContent = names.join(', ') + (mods.length > 3 ? ` и ещё ${mods.length - 3}` : '')
+  title.append(name, sample)
+  const count = document.createElement('span')
+  count.className = 'sec-count'
+  count.textContent = String(mods.length)
+  const arrow = document.createElement('span')
+  arrow.className = 'sec-arrow'
+  arrow.setAttribute('aria-hidden', 'true')
+  sum.append(icons, title, count, arrow)
+  det.append(sum)
+  // карточки рисуем только при первом раскрытии: в большой сборке их больше сотни
+  det.addEventListener('toggle', () => {
+    if (!det.open || det.querySelector('.cards')) return
     const grid = document.createElement('div')
     grid.className = 'cards'
     mods.forEach((m, i) => {
       const c = card(m, i)
+      if (!state.enabled.has(m.project.id)) { c.classList.add('off'); c.querySelector('.toggle').checked = false }
       grid.append(c)
-      io.observe(c)
+      requestAnimationFrame(() => c.classList.add('in'))
     })
-    box.append(head, grid)
-  }
+    det.append(grid)
+  })
+  return det
+}
 
-  const skipped = [...new Map(pack.skipped.map(s => [s.title, s])).values()]
+// Отсеянное — по понятным группам, а не одной длинной простынёй
+const SKIP_GROUPS = [
+  ['Падают или мешают (проверено запуском)', /проверено запуском|прячет ошибки|запускает Fabric-моды|падал в игре/],
+  ['Не подружились с другими модами', /дублирует|несовместим|делает то же|вдвоём/],
+  ['Нет версии под вашу игру', /нет версии под|файл сделан для|в файле версия|Missing ModLoader/],
+  ['Не хватает нужного мода', /нет зависимости|требует мод|нужен .* версии|нужен «/],
+  ['Дополнения без основного мода', /дополнение к/],
+  ['Давно не обновлялись', /давно не обновлялся/],
+  ['Вы просили без этого', /вы просили без/],
+]
+
+function renderSkipped(list) {
+  const skipped = [...new Map(list.map(s => [s.title, s])).values()]
   $('#skipped').hidden = !skipped.length
-  const ul = $('#skipped-list')
-  ul.textContent = ''
-  for (const s of skipped.slice(0, 60)) {
-    const li = document.createElement('li')
-    li.textContent = `${s.title}: ${s.why}`
-    ul.append(li)
+  $('#skipped-count').textContent = String(skipped.length)
+  const box = $('#skipped-list')
+  box.textContent = ''
+  const groups = new Map()
+  for (const s of skipped) {
+    const g = SKIP_GROUPS.find(([, re]) => re.test(s.why))?.[0] || 'Другое'
+    if (!groups.has(g)) groups.set(g, [])
+    groups.get(g).push(s)
   }
-  const result = $('#result')
-  result.hidden = false
-  result.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' })
+  for (const [g, items] of [...groups].sort((a, b) => b[1].length - a[1].length)) {
+    const det = document.createElement('details')
+    det.className = 'skip-group'
+    const sum = document.createElement('summary')
+    sum.textContent = `${g} `
+    const n = document.createElement('small')
+    n.textContent = String(items.length)
+    sum.append(n)
+    const ul = document.createElement('ul')
+    for (const s of items.slice(0, 40)) {
+      const li = document.createElement('li')
+      const b = document.createElement('b')
+      b.textContent = s.title
+      li.append(b, ` — ${s.why}`)
+      ul.append(li)
+    }
+    det.append(sum, ul)
+    box.append(det)
+  }
 }
 
 function enabledPack() {
@@ -525,11 +713,13 @@ function download(blob, name) {
 
 // «Комфортные настройки игры»: options.txt кладётся в сборку, только если включён переключатель
 const comfortOptions = () => ($('#comfort').checked ? COMFORT_OPTIONS : null)
+// настройки, чтобы шейдер и ресурспаки включились сами (вместе с комфортными настройками, если они включены)
+const extraFiles = pack => graphicsConfigs(pack.extras || [], pack.loader, comfortOptions())
 
 async function downloadMrpack() {
   const pack = enabledPack()
   const index = buildIndex({ ...pack, summary: `Собрано на Modsmith по описанию: ${pack.text}` })
-  download(await mrpackBlob(index, window.JSZip, comfortOptions(), pack.ref), fileName(pack, 'mrpack'))
+  download(await mrpackBlob(index, window.JSZip, comfortOptions(), pack.ref, extraFiles(pack)), fileName(pack, 'mrpack'))
   toast('Готово! Открой файл двойным кликом в Modrinth App или перетащи в Prism Launcher.')
 }
 
@@ -542,7 +732,7 @@ async function downloadZip() {
     const { blob, failed } = await modsZipBlob(pack, window.JSZip, k => {
       fill.style.width = `${Math.round(k * 100)}%`
       label.textContent = `Скачиваю ${Math.round(k * 100)}%`
-    }, undefined, comfortOptions())
+    }, undefined, comfortOptions(), extraFiles(pack))
     download(blob, fileName(pack, 'zip'))
     toast(failed.length ? `Не скачались: ${failed.join(', ')}. Остальное в архиве.` : 'Архив готов: распакуй папку mods в .minecraft.', !!failed.length)
   } catch {
@@ -554,38 +744,103 @@ async function downloadZip() {
   }
 }
 
+async function downloadServer() {
+  const btn = $('#dl-server')
+  const fill = btn.querySelector('.btn-fill'), label = btn.querySelector('.btn-text')
+  btn.disabled = true
+  const pack = enabledPack()
+  try {
+    const inst = await api.getJson('https://meta.fabricmc.net/v2/versions/installer').catch(() => null)
+    const { blob, failed, count } = await serverZipBlob(pack, window.JSZip, k => {
+      fill.style.width = `${Math.round(k * 100)}%`
+      label.textContent = `Скачиваю ${Math.round(k * 100)}%`
+    }, undefined, inst?.[0]?.version || '1.0.1')
+    download(blob, fileName(pack, 'zip').replace(/\.zip$/, '-server.zip'))
+    toast(failed.length ? `Не скачались: ${failed.join(', ')}. Остальное в архиве.` : `Сервер готов: ${count} модов. Распакуйте и запустите start.bat.`, !!failed.length)
+  } catch {
+    toast('Не получилось собрать серверный архив. Попробуйте ещё раз.', true)
+  } finally {
+    btn.disabled = false
+    fill.style.width = '0%'
+    label.textContent = 'Серверная сборка'
+  }
+}
+
 // ---------- «Доктор сборки» ----------
 let diagnosis = null
+let logText = '' // текст из перетащенных файлов
+
+async function readLogFiles(files) {
+  const list = [...files].slice(0, 4)
+  if (!list.length) return
+  // latest.log бывает огромным: самое важное (список модов и первая ошибка) — в начале и в конце
+  const parts = await Promise.all(list.map(async f => {
+    const t = await f.text()
+    return t.length > 6e6 ? `${t.slice(0, 3e6)}\n…\n${t.slice(-3e6)}` : t
+  }))
+  logText = parts.join('\n\n')
+  $('#drop-name').textContent = `Загружено: ${list.map(f => f.name).join(', ')}`
+  runDoctor()
+}
+
+function diagBlock(kind, title, items) {
+  const div = document.createElement('div')
+  div.className = `diag-block ${kind}`
+  const h = document.createElement('h3')
+  h.textContent = title
+  const ul = document.createElement('ul')
+  for (const { name, why, fix } of items) {
+    const li = document.createElement('li')
+    if (name) {
+      const b = document.createElement('b')
+      b.textContent = name
+      li.append(b, `: ${why}`)
+    } else li.append(why)
+    if (fix) {
+      const f = document.createElement('span')
+      f.className = 'diag-fix'
+      f.textContent = fix
+      li.append(f)
+    }
+    ul.append(li)
+  }
+  div.append(h, ul)
+  return div
+}
+
 function runDoctor() {
   const box = $('#diag-result')
   box.textContent = ''
-  const text = $('#crash').value
-  if (!state.pack) { toast('Сначала соберите сборку (или откройте ссылку на неё), потом вставьте crash-report.'); return }
-  if (text.trim().length < 40) { toast('Вставьте текст crash-report целиком: файл из папки crash-reports или logs/latest.log.'); return }
-  const mods = state.pack.mods.filter(m => state.enabled.has(m.project.id))
+  const text = logText || $('#crash').value
+  if (text.trim().length < 40) { toast('Перетащите файл logs/latest.log или crash-report — или вставьте текст ошибки целиком.'); return }
+  const mods = state.pack ? state.pack.mods.filter(m => state.enabled.has(m.project.id)) : []
   diagnosis = diagnose(text, mods)
-  const all = [...diagnosis.culprits, ...diagnosis.dependents]
-  const p = document.createElement('p')
-  if (!all.length) {
-    p.textContent = 'В этой сборке виновника не нашёл. Проверьте, что вставили отчёт именно от этой сборки, или пришлите logs/latest.log: там подробнее.'
-    box.append(p)
-    return
+  const { culprits, dependents, problems, hints, mc, logMods } = diagnosis
+  const inPack = new Set(culprits.map(c => c.mod.project.title))
+  const facts = document.createElement('p')
+  facts.textContent = [mc && `Minecraft ${mc}`, logMods.length && `модов в логе: ${logMods.length}`].filter(Boolean).join(' · ')
+  if (facts.textContent) box.append(facts)
+
+  if (culprits.length || dependents.length) {
+    box.append(diagBlock('bad', culprits.length === 1 ? 'Виновник в вашей сборке' : `Виновники в вашей сборке: ${culprits.length}`,
+      [...culprits, ...dependents].map(({ mod, why }) => ({ name: mod.project.title, why }))))
+    const fix = document.createElement('button')
+    fix.type = 'button'
+    fix.className = 'btn btn-primary'
+    fix.textContent = 'Убрать их и скачать исправленную сборку'
+    fix.addEventListener('click', applyDoctor)
+    box.append(fix)
   }
-  p.textContent = diagnosis.culprits.length === 1 ? 'Нашёл виновника:' : `Нашёл виновников: ${diagnosis.culprits.length}`
-  const ul = document.createElement('ul')
-  for (const { mod, why } of all) {
-    const li = document.createElement('li')
-    const b = document.createElement('b')
-    b.textContent = mod.project.title
-    li.append(b, `: ${why}`)
-    ul.append(li)
+  const rest = problems.filter(p => !inPack.has(p.title))
+  if (rest.length) box.append(diagBlock('bad', 'Что сломалось и как починить', rest.map(p => ({ name: p.title, why: p.why, fix: p.fix }))))
+  if (hints.length) box.append(diagBlock('warn', 'Подозрительно', hints.map(h => ({ why: h }))))
+  if (!culprits.length && !problems.length) {
+    box.append(diagBlock('warn', 'Явной ошибки в этом тексте нет', [
+      { why: 'Если игра вылетает, пришлите отчёт из папки crash-reports: в нём точная причина.' },
+      { why: 'Если зависает создание мира — чаще всего виноваты сразу несколько модов на биомы или C2ME. Оставьте один мод на биомы.' },
+      { why: 'Если лог обрывается без ошибки — пришлите logs/debug.log: туда пишется больше.' },
+    ]))
   }
-  const fix = document.createElement('button')
-  fix.type = 'button'
-  fix.className = 'btn btn-primary'
-  fix.textContent = 'Убрать их и скачать исправленную сборку'
-  fix.addEventListener('click', applyDoctor)
-  box.append(p, ul, fix)
 }
 
 async function applyDoctor() {
@@ -602,7 +857,9 @@ async function applyDoctor() {
 }
 
 function shareParams(opts, text) {
-  return new URLSearchParams({ q: text, v: opts.version, l: opts.loader, s: opts.size, p: opts.perf ? '1' : '0', u: opts.qol ? '1' : '0', a: opts.polish ? '1' : '0' }).toString()
+  const g = opts.graphics || {}
+  return new URLSearchParams({ q: text, v: opts.version, l: opts.loader, s: opts.size, p: opts.perf ? '1' : '0', u: opts.qol ? '1' : '0', a: opts.polish ? '1' : '0',
+    sh: g.shader || '', rp: (g.packs || []).join(',') }).toString()
 }
 
 async function share() {
@@ -623,9 +880,90 @@ function restoreFromHash() {
   $('#perf').checked = h.get('p') !== '0'
   $('#qol').checked = h.get('u') !== '0'
   $('#polish').checked = h.get('a') !== '0'
+  if (h.get('sh')) { $('#shaders').checked = true; $('#shader-pick').value = h.get('sh'); manualShader = true }
+  if (h.get('rp')) {
+    $('#rpacks').checked = true
+    const on = new Set(h.get('rp').split(','))
+    document.querySelectorAll('#rp-list input').forEach(i => { i.checked = on.has(i.value) })
+  }
+  syncGfx()
   $('.typer').classList.add('hidden')
   onInput()
   return true
+}
+
+// ---------- плавающая панель скачивания ----------
+// Кнопки «Скачать» всегда под рукой: когда основные ушли за экран, снизу выезжает панель
+function initDock() {
+  const dock = $('#dock')
+  const acts = { mrpack: downloadMrpack, zip: downloadZip, server: downloadServer }
+  dock.addEventListener('click', async e => {
+    const btn = e.target.closest('button')
+    if (!btn) return
+    if (btn.dataset.act === 'up') { $('#result').scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' }); return }
+    if (btn.classList.contains('busy') || !acts[btn.dataset.act]) return
+    btn.classList.add('busy')
+    try { await acts[btn.dataset.act]() } finally { btn.classList.remove('busy') }
+  })
+  let summaryVisible = true
+  const update = () => dock.classList.toggle('on', !!state.pack && !$('#result').hidden && !summaryVisible)
+  new IntersectionObserver(([e]) => { summaryVisible = e.isIntersecting; update() }).observe($('.summary'))
+  return update
+}
+let updateDock = () => {}
+
+function renderDockInfo() {
+  const mods = state.pack.mods.filter(m => state.enabled.has(m.project.id))
+  const mb = mods.reduce((s, m) => s + m.file.size, 0) / 1048576
+  const info = $('#dock-info')
+  info.textContent = ''
+  const b = document.createElement('b')
+  b.textContent = String(mods.length)
+  info.append(b, ` модов · ${Math.round(mb)} МБ`)
+  updateDock()
+}
+
+// ---------- подсказки в стиле сайта ----------
+// Вместо системных title: своя подсказка, появляется быстро и выглядит как часть сайта
+function initTips() {
+  const tip = document.createElement('div')
+  tip.className = 'tip'
+  tip.setAttribute('role', 'tooltip')
+  document.body.append(tip)
+  let timer = null, current = null
+  const adopt = root => root.querySelectorAll('[title]').forEach(el => {
+    if (el.closest('.card')) return
+    el.dataset.tip = el.title
+    el.removeAttribute('title')
+  })
+  adopt(document)
+  new MutationObserver(muts => muts.forEach(m => m.addedNodes.forEach(n => n.nodeType === 1 && (n.title ? adopt(n.parentNode || n) : adopt(n)))))
+    .observe(document.body, { childList: true, subtree: true })
+  const show = el => {
+    current = el
+    tip.textContent = el.dataset.tip
+    tip.classList.add('on')
+    const r = el.getBoundingClientRect()
+    const w = tip.offsetWidth, h = tip.offsetHeight
+    let x = r.left + r.width / 2 - w / 2
+    x = Math.max(12, Math.min(x, innerWidth - w - 12))
+    const above = r.top - h - 10
+    tip.style.left = `${x}px`
+    tip.style.top = `${above > 8 ? above : r.bottom + 10}px`
+    tip.classList.toggle('below', above <= 8)
+  }
+  const hide = () => { clearTimeout(timer); current = null; tip.classList.remove('on') }
+  const enter = e => {
+    const el = e.target.closest?.('[data-tip]')
+    if (!el || el === current) return
+    clearTimeout(timer)
+    timer = setTimeout(() => show(el), current ? 0 : 120)
+  }
+  document.addEventListener('pointerover', enter)
+  document.addEventListener('focusin', enter)
+  document.addEventListener('pointerout', e => { if (current && !current.contains(e.relatedTarget)) hide() })
+  document.addEventListener('focusout', hide)
+  addEventListener('scroll', hide, { passive: true })
 }
 
 // ---------- запуск ----------
@@ -635,6 +973,11 @@ async function main() {
   spawnCubes()
   typer()
   initSegs()
+  initGfx()
+  updateDock = initDock()
+  startPet({ reduceMotion })
+  initTips()
+  initThemePicker()
   const forge = $('.forge')
   forge.addEventListener('pointermove', e => {
     const r = forge.getBoundingClientRect()
@@ -644,10 +987,17 @@ async function main() {
   $('#prompt').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) craft() })
   $('#craft').addEventListener('click', craft)
   $('#diagnose').addEventListener('click', runDoctor)
+  $('#crash-file').addEventListener('change', e => readLogFiles(e.target.files))
+  $('#crash').addEventListener('input', () => { logText = ''; $('#drop-name').textContent = '' })
+  const drop = $('#drop')
+  for (const ev of ['dragenter', 'dragover']) drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over') })
+  for (const ev of ['dragleave', 'drop']) drop.addEventListener(ev, () => drop.classList.remove('over'))
+  drop.addEventListener('drop', e => { e.preventDefault(); readLogFiles(e.dataTransfer.files) })
   const list = $('#theme-list')
   for (const t of [...THEMES].sort((a, b) => a.label.localeCompare(b.label, 'ru'))) list.append(new Option(t.label))
   $('#dl-mrpack').addEventListener('click', downloadMrpack)
   $('#dl-zip').addEventListener('click', downloadZip)
+  $('#dl-server').addEventListener('click', downloadServer)
   $('#share').addEventListener('click', share)
   await loadVersions()
   if (restoreFromHash()) setTimeout(craft, 900)

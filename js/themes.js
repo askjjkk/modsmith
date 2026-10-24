@@ -92,6 +92,10 @@ export const GROUPS = [
   { id: 'render', slugs: ['sodium', 'embeddium', 'rubidium', 'optifabric', 'canvas-renderer'], title: /\b(sodium|embeddium|rubidium|optifine)\b/i },
   // Lithium и его порты (Radium, Canary) встраиваются в одно и то же: вдвоём игра падает на старте (проверено запуском)
   { id: 'lithium', slugs: ['lithium', 'radium', 'canary'], title: /^(lithium|radium|canary)\b/i },
+  // большие моды на биомы: вдвоём-втроём генерация мира зависает на 0% (сборка пользователя, 24.10)
+  { id: 'biome_overhaul', slugs: ['biomes-o-plenty', 'terralith', 'oh-the-biomes-weve-gone', 'oh-the-biomes-youll-go', 'regions-unexplored', 'william-wythers-overhauled-overworld'], title: /\b(biomes o'? ?plenty|terralith|oh the biomes|regions unexplored|wythers)\b/i },
+  // рельеф: Tectonic и Epic Terrain переделывают одно и то же (с Terralith Tectonic как раз дружит)
+  { id: 'terrain', slugs: ['tectonic', 'epicterrain', 'lithosphere', 'big-globe'], title: /^(tectonic|epic terrain)\b/i },
   { id: 'shaders', slugs: ['iris', 'oculus'], title: /\b(iris shaders|oculus)\b/i },
   { id: 'minimap', slugs: ['xaeros-minimap', 'journeymap', 'voxelmap-updated', 'ftb-chunks-fabric', 'ftb-chunks-forge'], title: /\b(minimap|journeymap|voxelmap)\b/i },
   { id: 'worldmap', slugs: ['xaeros-world-map', 'journeymap'], title: /\bworld ?map\b/i },

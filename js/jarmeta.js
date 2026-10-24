@@ -1,7 +1,16 @@
 // Читает, что мод требует на самом деле: fabric.mod.json / quilt.mod.json / mods.toml прямо из .jar.
 // Файл целиком не качаем: только конец архива (оглавление) и нужную запись (HTTP Range).
 
-const WANTED = ['fabric.mod.json', 'quilt.mod.json', 'META-INF/mods.toml', 'META-INF/neoforge.mods.toml']
+const WANTED = ['fabric.mod.json', 'quilt.mod.json', 'META-INF/mods.toml', 'META-INF/neoforge.mods.toml', 'META-INF/MANIFEST.MF']
+// какой файл описания читать первым: в одном jar бывают версии сразу под несколько загрузчиков
+const ORDER = {
+  fabric: ['fabric.mod.json', 'quilt.mod.json', 'META-INF/neoforge.mods.toml', 'META-INF/mods.toml'],
+  quilt: ['quilt.mod.json', 'fabric.mod.json', 'META-INF/neoforge.mods.toml', 'META-INF/mods.toml'],
+  forge: ['META-INF/mods.toml', 'META-INF/neoforge.mods.toml', 'fabric.mod.json', 'quilt.mod.json'],
+  neoforge: ['META-INF/neoforge.mods.toml', 'META-INF/mods.toml', 'fabric.mod.json', 'quilt.mod.json'],
+}
+// под какой загрузчик этот файл описания
+const KIND = { 'fabric.mod.json': 'fabric', 'quilt.mod.json': 'quilt', 'META-INF/mods.toml': 'forge', 'META-INF/neoforge.mods.toml': 'neoforge' }
 const PLATFORM = new Set(['minecraft', 'java', 'fabricloader', 'fabric_loader', 'quilt_loader', 'forge', 'neoforge',
   'javafml', 'lowcodefml', 'mixinextras', 'quilted_fabric_api'])
 
@@ -42,20 +51,33 @@ export function nestedIds(path) {
 export function parseFabric(text) {
   const j = JSON.parse(text.replace(/^﻿/, ''))
   const provides = (j.provides || []).map(norm)
+  const depends = j.depends || {}
   return {
     ids: [norm(j.id), ...provides],
-    depends: Object.keys(j.depends || {}).map(norm),
+    depends: Object.keys(depends).map(norm),
     nested: (j.jars || []).flatMap(x => nestedIds(x.file)),
+    mc: depends.minecraft ?? null,
+    mcKind: 'fabric',
+    ranges: Object.fromEntries(Object.entries(depends).map(([k, v]) => [norm(k), v])),
+    breaks: Object.fromEntries(Object.entries(j.breaks || {}).map(([k, v]) => [norm(k), v])),
+    mixins: (j.mixins || []).map(m => (typeof m === 'string' ? m : m?.config)).filter(Boolean),
   }
 }
 
 export function parseQuilt(text) {
   const q = JSON.parse(text).quilt_loader || {}
   const dep = d => (typeof d === 'string' ? { id: d } : d)
+  const deps = (q.depends || []).map(dep).filter(d => !d.optional && d.id)
+  const mixin = JSON.parse(text).mixin
   return {
     ids: [norm(q.id), ...(q.provides || []).map(p => norm(typeof p === 'string' ? p : p.id))],
-    depends: (q.depends || []).map(dep).filter(d => !d.optional && d.id).map(d => norm(d.id)),
+    depends: deps.map(d => norm(d.id)),
     nested: (q.jars || []).flatMap(nestedIds),
+    mc: deps.find(d => d.id === 'minecraft')?.versions ?? null,
+    mcKind: 'fabric',
+    ranges: Object.fromEntries(deps.filter(d => d.versions).map(d => [norm(d.id), d.versions])),
+    breaks: Object.fromEntries((q.breaks || []).map(dep).filter(d => d.id).map(d => [norm(d.id), d.versions || '*'])),
+    mixins: [mixin || []].flat(),
   }
 }
 
@@ -63,6 +85,10 @@ export function parseQuilt(text) {
 export function parseToml(text) {
   const ids = []
   const depends = []
+  const ranges = {}
+  const breaks = {} // id -> диапазон версий, с которыми мод несовместим
+  const mixins = []
+  let mc = null
   for (const block of text.split(/^\s*\[\[/m).slice(1)) {
     const head = block.slice(0, block.indexOf(']]'))
     const get = key => block.match(new RegExp(`^\\s*${key}\\s*=\\s*["']?([^"'\\n#]+)`, 'm'))?.[1]?.trim()
@@ -74,10 +100,21 @@ export function parseToml(text) {
       const mandatory = get('mandatory')
       const type = get('type')
       const required = type ? type.toLowerCase() === 'required' : mandatory !== 'false'
-      if (id && required) depends.push(norm(id))
+      const range = get('versionRange')
+      if (id && type?.toLowerCase() === 'incompatible') breaks[norm(id)] = range || '*'
+      else if (id && required) {
+        depends.push(norm(id))
+        if (range) ranges[norm(id)] = range
+        if (norm(id) === 'minecraft' && range) mc = range
+      }
+    } else if (head.trim() === 'mixins') {
+      const config = get('config')
+      if (config) mixins.push(config)
     }
   }
-  return { ids, depends, nested: [] }
+  // без строки modLoader старые NeoForge/Forge не читают файл («Missing ModLoader»)
+  const hasModLoader = /^\s*modLoader\s*=/m.test(text)
+  return { ids, depends, nested: [], mc, mcKind: 'maven', ranges, breaks, mixins, hasModLoader }
 }
 
 const u16 = (b, o) => b[o] | (b[o + 1] << 8)
@@ -96,8 +133,11 @@ async function inflate(bytes, method) {
   return new Uint8Array(await new Response(stream).arrayBuffer())
 }
 
-/** Возвращает { ids, depends, nested } или null, если прочитать не вышло. */
-export async function readJarMeta(url, size, fetchImpl = (...a) => fetch(...a)) {
+/**
+ * Возвращает { ids, depends, nested, kind, mc, mcKind, ranges, breaks, mixins } или null, если прочитать не вышло.
+ * kind — под какой загрузчик описание (для Forge-сборки jar только с fabric.mod.json не подходит).
+ */
+export async function readJarMeta(url, size, fetchImpl = (...a) => fetch(...a), loader = 'fabric') {
   try {
     const tailStart = Math.max(0, size - 66000)
     const tail = await range(fetchImpl, url, tailStart, size - 1)
@@ -134,13 +174,18 @@ export async function readJarMeta(url, size, fetchImpl = (...a) => fetch(...a)) 
       return dec.decode(await inflate(head.subarray(start, start + e.comp), e.method))
     }
 
-    let meta = null
-    if (entries.has('fabric.mod.json')) meta = parseFabric(await read('fabric.mod.json'))
-    else if (entries.has('quilt.mod.json')) meta = parseQuilt(await read('quilt.mod.json'))
-    else if (entries.has('META-INF/neoforge.mods.toml')) meta = parseToml(await read('META-INF/neoforge.mods.toml'))
-    else if (entries.has('META-INF/mods.toml')) meta = parseToml(await read('META-INF/mods.toml'))
-    if (!meta) return null
+    const file = (ORDER[loader] || ORDER.fabric).find(name => entries.has(name))
+    if (!file) return null
+    const text = await read(file)
+    const meta = file.endsWith('.toml') ? parseToml(text) : file === 'quilt.mod.json' ? parseQuilt(text) : parseFabric(text)
+    meta.kind = KIND[file]
     meta.nested = [...new Set([...meta.nested, ...nested])]
+    // Forge 1.20 и старше перечисляет встраивания (mixin) в MANIFEST.MF
+    if (file.endsWith('.toml') && entries.has('META-INF/MANIFEST.MF')) {
+      const manifest = (await read('META-INF/MANIFEST.MF')).replace(/\r?\n /g, '') // длинные строки манифеста переносятся
+      const line = manifest.match(/^MixinConfigs:\s*(.+)$/m)?.[1]
+      if (line) meta.mixins = [...new Set([...meta.mixins, ...line.split(',').map(s => s.trim()).filter(Boolean)])]
+    }
     return meta
   } catch {
     return null

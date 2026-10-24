@@ -2,12 +2,26 @@
 import { BASE, GROUPS, SIZES, VANILLA_PLUS } from './themes.js'
 import { KNOWN_SLUGS, isPlatform, norm, readJarMeta } from './jarmeta.js'
 import { CHUNK_EXTRAS, loadRefPack } from './refpack.js'
+import { cmpVer, rangeFits, wrongMcInFilename } from './versions.js'
+import { SHADER_MOD, addGraphics } from './graphics.js'
+import { CLIENT_ONLY } from './broken.js'
 
 export const loaderList = loader => (loader === 'quilt' ? ['quilt', 'fabric'] : [loader])
 
-export function pickVersion(versions) {
+/**
+ * Лучшая версия мода: стабильная, и файл не под другую версию игры (на Modrinth такое бывает:
+ * «getittogetherdrops-…-1.21.5» помечен как подходящий для 1.21.1, а в игре падает).
+ * noAlpha — для базы (оптимизация и т.п.): альфа-версии туда не берём.
+ */
+export function pickVersion(versions, mc = null, { noAlpha = false } = {}) {
   if (!versions?.length) return null
-  return versions.find(v => v.version_type === 'release') || versions[0]
+  const filename = v => (v.files?.find(f => f.primary) || v.files?.[0])?.filename || ''
+  const fits = mc ? versions.filter(v => !wrongMcInFilename(filename(v), mc)) : versions
+  for (const type of noAlpha ? ['release', 'beta'] : ['release', 'beta', 'alpha']) {
+    const v = fits.find(x => x.version_type === type)
+    if (v) return v
+  }
+  return noAlpha ? null : fits[0] || null
 }
 
 export function fileOf(version) {
@@ -15,8 +29,26 @@ export function fileOf(version) {
   return f && { url: f.url, filename: f.filename, size: f.size, hashes: f.hashes }
 }
 
+// Постройки, которые моды «улучшают» целиком: два мода на одну постройку дерутся (YUNG's Better Desert Temples
+// и Dungeons and Taverns Desert Temple Overhaul в одной сборке)
+const STRUCTURES = [['desert_temple', /desert (temple|pyramid)/], ['jungle_temple', /jungle (temple|pyramid)/],
+  ['stronghold', /stronghold/], ['mineshaft', /mineshaft/], ['ocean_monument', /ocean monument/],
+  ['nether_fortress', /nether fortress/], ['witch_hut', /witch hut/], ['dungeon', /\bdungeons?\b/], ['end_city', /end (city|cities)/],
+  ['bastion', /bastion/], ['outpost', /outpost/], ['mansion', /mansion/], ['igloo', /igloo/], ['shipwreck', /shipwreck/],
+  ['ocean_ruins', /ocean ruin/], ['trail_ruins', /trail ruin/], ['ancient_city', /ancient cit/], ['trial_chamber', /trial chamber/],
+  ['end_island', /end island/]]
+
+export function structureKey(project) {
+  const t = project.title.toLowerCase()
+  if (!/\b(better|overhaul|overhauled|replacement|reimagined|improved|remastered|revamped?)\b/.test(t)) return null
+  return STRUCTURES.find(([, re]) => re.test(t))?.[0] || null
+}
+
 export function groupOf(project) {
-  return GROUPS.find(g => g.slugs.includes(project.slug) || g.title.test(project.title))?.id || null
+  const g = GROUPS.find(g => g.slugs.includes(project.slug) || g.title.test(project.title))?.id
+  if (g) return g
+  const st = structureKey(project)
+  return st ? `structure:${st}` : null
 }
 
 export const isLibrary = project => (project.categories || []).includes('library')
@@ -25,35 +57,51 @@ export const MIN_DOWNLOADS = 15000
 
 // Крупные моды, к которым пишут дополнения. Если описание мода про них, а их нет в сборке, мод не работает
 // (пример: CobbleBoss «для мира Cobblemon» падает без Cobblemon, хотя зависимость нигде не указана).
+// Четвёртое поле: можно ли просто добавить основной мод. Лёгкие (Farmer's Delight) — да;
+// большие (Create, Cobblemon) — нет: тащить огромный мод ради одного дополнения нельзя.
 export const ECOSYSTEMS = [
-  ['Cobblemon', /\bcobblemon\b/i, 'cobblemon'],
-  ['Pixelmon', /\bpixelmon\b/i, 'pixelmon'],
-  ['Create', /^create[:\s]|\bcreate addon|\baddon (for|to) create\b|\bfor create\b/i, 'create'],
-  ['Mekanism', /\bmekanism\b/i, 'mekanism'],
-  ['Applied Energistics 2', /\bapplied energistics\b|\bae2\b/i, 'ae2'],
-  ['Iron\'s Spells', /\biron'?s spells\b/i, 'irons-spells-n-spellbooks'],
-  ['Ars Nouveau', /\bars nouveau\b/i, 'ars-nouveau'],
-  ['Botania', /\bbotania\b/i, 'botania'],
-  ['Tinkers\' Construct', /\btinkers'? construct\b/i, 'tinkers-construct'],
-  ['L_Ender\'s Cataclysm', /\bcataclysm\b/i, 'l_enders_cataclysm'],
-  ['Alex\'s Mobs', /\balex'?s mobs\b/i, 'alexs-mobs'],
-  ['Farmer\'s Delight', /\bfarmer'?s delight\b/i, 'farmers-delight'],
-  ['Origins', /\borigins? (addon|expansion)\b/i, 'origins'],
-  ['Tensura', /\btensura\b/i, 'tensura-reincarnated'],
+  ['Cobblemon', /\bcobblemon\b/i, 'cobblemon', false],
+  ['Pixelmon', /\bpixelmon\b/i, 'pixelmon', false],
+  ['Create', /^create[:\s]|\bcreate addon|\baddon (for|to) create\b|\bfor create\b/i, 'create', false],
+  ['Mekanism', /\bmekanism\b/i, 'mekanism', false],
+  ['Applied Energistics 2', /\bapplied energistics\b|\bae2\b/i, 'ae2', false],
+  ['Iron\'s Spells', /\biron'?s spells\b/i, 'irons-spells-n-spellbooks', false],
+  ['Ars Nouveau', /\bars nouveau\b/i, 'ars-nouveau', false],
+  ['Botania', /\bbotania\b/i, 'botania', false],
+  ['Tinkers\' Construct', /\btinkers'? construct\b/i, 'tinkers-construct', false],
+  ['L_Ender\'s Cataclysm', /\bcataclysm\b/i, 'l_enders_cataclysm', false],
+  ['Alex\'s Mobs', /\balex'?s mobs\b/i, 'alexs-mobs', true],
+  ['Farmer\'s Delight', /\bfarmer'?s delight\b/i, 'farmers-delight', true],
+  ['Origins', /\borigins? (addon|expansion)\b/i, 'origins', true],
+  ['Tensura', /\btensura\b/i, 'tensura-reincarnated', false],
 ]
 
-export function missingBase(project, chosen) {
+/** Какой основы не хватает дополнению: { name, slug, auto } или null */
+export function missingEcosystem(project, chosen) {
   const text = `${project.title} ${project.description || ''}`
   const have = new Set([...chosen.values()].map(m => m.project.slug))
-  for (const [name, re, slug] of ECOSYSTEMS) {
+  for (const [name, re, slug, auto] of ECOSYSTEMS) {
     if (project.slug === slug || have.has(slug)) continue
-    if (re.test(text)) return name
+    if (re.test(text)) return { name, slug, auto }
   }
   return null
 }
 
+export const missingBase = (project, chosen) => missingEcosystem(project, chosen)?.name || null
+
+// Зависимости, которые авторы забыли указать на Modrinth (найдено по настоящим падениям)
+export const EXTRA_DEPS = {
+  'ancient-warfare-3-npcs': ['arlib'], // NoClassDefFoundError: ARLib/network/…
+}
+
+// На Forge/NeoForge вместо Fabric API работает его порт (P7dR8mSH — Fabric API)
+const DEP_SUBSTITUTE = {
+  forge: { P7dR8mSH: 'forgified-fabric-api' },
+  neoforge: { P7dR8mSH: 'forgified-fabric-api' },
+}
+
 // Библиотеки, которые обычно не ломают старые моды при обновлении
-const STABLE_LIBS = new Set(['fabric-api', 'fabric-language-kotlin', 'kotlin-for-forge', 'cloth-config', 'architectury-api',
+export const STABLE_LIBS = new Set(['fabric-api', 'fabric-language-kotlin', 'kotlin-for-forge', 'cloth-config', 'architectury-api',
   'forge-config-api-port', 'yacl', 'modmenu', 'trinkets', 'curios', 'playeranimator', 'geckolib', 'azurelib', 'balm',
   'puzzles-lib', 'resourceful-config', 'resourceful-lib', 'structure-pool-api', 'cardinal-components-api', 'owo-lib',
   'midnightlib', 'jei', 'emi', 'jade', 'terrablender', 'lithostitched', 'bookshelf-lib', 'citadel', 'collective',
@@ -66,7 +114,8 @@ export function majorMinor(versionNumber, mc) {
   return m ? `${m[1]}.${m[2]}` : null
 }
 // шуточные и «не про то» моды, которые поиск любит поднимать
-const NOISE = /dragon ?ball|meme|joke|troll|april fools|\bmod ?pack\b/i
+// скайблок и «один блок» меняют весь мир — в обычную сборку по теме «биомы» им нельзя
+const NOISE = /dragon ?ball|meme|joke|troll|april fools|\bmod ?pack\b|sky ?block|one ?block|void world/i
 
 // Насколько мод подходит теме: популярность + совпадение категории + слова темы в названии/описании
 export function themeScore(theme, p) {
@@ -103,6 +152,21 @@ export function titleMatches(theme, p) {
     : new RegExp(`[^a-z]${w.replace(/s$/, '')}s?[^a-z]`).test(title)))
 }
 
+// «mixins.json», «common.mixins.json» — общие имена, по ним дубли не ищем
+const GENERIC_MIXIN = /^(mixins?|common|client|server|main)(\.mixins?)?\.json$/i
+
+// «1.10.9+1.21.1-fabric» -> «1.10.9», «1.21-3.2.8.5» -> «3.2.8.5», «mc1.21.1-0.8.13» -> «0.8.13»:
+// номер версии самой библиотеки, без версии игры (её семейство: 1.21 и 1.21.1 для игры 1.21.1)
+export function libVersion(number, mc) {
+  const family = mc.split('.').slice(0, 2).join('.')
+  const cleaned = String(number).replace(/(?<![\d.])(?:mc)?(1\.\d{1,2}(?:\.\d{1,2})?)(?![\d])/g,
+    (all, v) => (v === mc || v === family || v.startsWith(`${family}.`) ? ' ' : all))
+  return cleaned.match(/\d+(?:\.\d+)+/)?.[0] || cleaned.match(/\d+/)?.[0] || null
+}
+
+// NeoForge до 1.21.6 не читает описание без строки modLoader («Missing ModLoader in file»)
+const OLD_NEO = mc => cmpVer(mc, '1.21.6') < 0
+
 const incompatibleIds = version => (version.dependencies || [])
   .filter(d => d.dependency_type === 'incompatible' && d.project_id).map(d => d.project_id)
 
@@ -119,10 +183,11 @@ export class PackBuilder {
     this.skipped = []
     this.readMeta = readMeta
     this.metaCache = new Map()
+    this.vetoed = new Set() // убранные моды обратно не добавляем
   }
 
-  async versionFor(projectId) {
-    return pickVersion(await this.api.versions(projectId, this.version, this.loaders))
+  async versionFor(projectId, { noAlpha = false } = {}) {
+    return pickVersion(await this.api.versions(projectId, this.version, this.loaders), this.version, { noAlpha })
   }
 
   conflicts(project, version) {
@@ -136,21 +201,36 @@ export class PackBuilder {
   }
 
   // Обязательные зависимости по цепочке. Возвращает Map или строку с причиной отказа.
-  async resolveDeps(version, acc = new Map(), depth = 0) {
-    for (const d of version.dependencies || []) {
+  async resolveDeps(version, acc = new Map(), depth = 0, owner = null) {
+    let deps = version.dependencies || []
+    if (!deps.length && version.project_id) {
+      // автор забыл указать зависимости в новой версии — берём их из предыдущей
+      const list = await this.api.versions(version.project_id, this.version, this.loaders)
+      deps = list.find(v => v.id !== version.id && v.date_published < version.date_published && v.dependencies?.length)?.dependencies || []
+    }
+    const extra = EXTRA_DEPS[owner?.slug] || []
+    if (extra.length) {
+      const found = await this.api.projects(extra)
+      deps = [...deps, ...found.filter(Boolean).map(p => ({ project_id: p.id, dependency_type: 'required' }))]
+    }
+    for (const d of deps) {
       if (d.dependency_type !== 'required') continue
       let pid = d.project_id
+      const sub = DEP_SUBSTITUTE[this.loader]?.[pid]
+      if (sub) pid = (await this.api.projects([sub]))[0]?.id || pid
       if (!pid && d.version_id) pid = (await this.api.getJson(`https://api.modrinth.com/v2/version/${d.version_id}`))?.project_id
       if (!pid || this.chosen.has(pid) || acc.has(pid)) continue
       const [project] = await this.api.projects([pid])
       if (!project) continue
+      const ban = this.blocked[project.slug] || this.blocked[`${project.slug}@${this.loader}`]
+      if (ban) return `нужен «${project.title}», а он ${ban}`
       const v = await this.versionFor(pid)
       if (!v) return `нет зависимости «${project.title}» под ${this.version}`
       const why = this.conflicts(project, v)
       if (why) return `зависимость «${project.title}» ${why}`
       acc.set(pid, { project, version: v })
       if (depth < 6) {
-        const res = await this.resolveDeps(v, acc, depth + 1)
+        const res = await this.resolveDeps(v, acc, depth + 1, project)
         if (typeof res === 'string') return res
       }
     }
@@ -158,13 +238,14 @@ export class PackBuilder {
   }
 
   // Пытается добавить мод вместе с зависимостями. true — добавлен.
-  async tryAdd(project, section, reason, { allowLibrary = false, quiet = false } = {}) {
-    if (this.chosen.has(project.id)) return false
+  async tryAdd(project, section, reason, { allowLibrary = false, quiet = false, noAlpha = false } = {}) {
+    if (this.chosen.has(project.id) || this.vetoed.has(project.id)) return false
     if (!allowLibrary && isLibrary(project)) return false
     const g = groupOf(project)
     if (g && this.groups.has(g)) return false
-    if (this.blocked[project.slug]) {
-      this.skipped.push({ title: project.title, why: this.blocked[project.slug] })
+    const ban = this.blocked[project.slug] || this.blocked[`${project.slug}@${this.loader}`]
+    if (ban) {
+      this.skipped.push({ title: project.title, why: ban })
       return false
     }
     const unwanted = !allowLibrary && this.excluded.find(t => matchesTheme(t, project))
@@ -172,12 +253,17 @@ export class PackBuilder {
       this.skipped.push({ title: project.title, why: `вы просили без темы «${unwanted.label}»` })
       return false
     }
-    const base = !allowLibrary && missingBase(project, this.chosen)
-    if (base) {
-      this.skipped.push({ title: project.title, why: `дополнение к ${base}, а его нет в сборке` })
-      return false
+    const eco = !allowLibrary && missingEcosystem(project, this.chosen)
+    if (eco) {
+      // дополнение без основы: лёгкую основу добавляем сами, тяжёлую (Cobblemon) — нет
+      const [baseProject] = eco.auto ? await this.api.projects([eco.slug]) : []
+      const ok = baseProject && await this.tryAdd(baseProject, section, `основа для ${project.title}`)
+      if (!ok) {
+        this.skipped.push({ title: project.title, why: `дополнение к ${eco.name}, а его нет в сборке` })
+        return false
+      }
     }
-    const version = await this.versionFor(project.id)
+    const version = await this.versionFor(project.id, { noAlpha })
     if (!version) {
       // для «полировки» это обычное дело (мод есть не под все версии) — не засоряем список отсеянного
       if (!quiet) this.skipped.push({ title: project.title, why: `нет версии под ${this.version} ${this.loader}` })
@@ -188,7 +274,7 @@ export class PackBuilder {
       this.skipped.push({ title: project.title, why })
       return false
     }
-    const deps = await this.resolveDeps(version)
+    const deps = await this.resolveDeps(version, new Map(), 0, project)
     if (typeof deps === 'string') {
       this.skipped.push({ title: project.title, why: deps })
       return false
@@ -203,6 +289,8 @@ export class PackBuilder {
   commit(project, version, section, reason, dep, parentId = null) {
     const file = fileOf(version)
     if (!file) return
+    // только для игры, хотя помечен и для сервера: в серверную часть сборки не попадёт
+    if (CLIENT_ONLY[project.slug]) project = { ...project, server: 'unsupported' }
     const mod = { project, version: { id: version.id, number: version.version_number, date: version.date_published }, file, section, reason, dep, parentId, incompatible: incompatibleIds(version) }
     this.chosen.set(project.id, mod)
     const g = groupOf(project)
@@ -251,13 +339,14 @@ export class PackBuilder {
     const mod = this.chosen.get(projectId)
     if (!mod) return
     this.chosen.delete(projectId)
+    this.vetoed.add(projectId)
     for (const [g, id] of this.groups) if (id === projectId) this.groups.delete(g)
     this.skipped.push({ title: mod.project.title, why })
   }
 
   async metaOf(mod) {
     if (!this.metaCache.has(mod.project.id)) {
-      this.metaCache.set(mod.project.id, this.readMeta(mod.file.url, mod.file.size))
+      this.metaCache.set(mod.project.id, this.readMeta(mod.file.url, mod.file.size, undefined, this.loader))
     }
     return this.metaCache.get(mod.project.id)
   }
@@ -277,7 +366,7 @@ export class PackBuilder {
       if (!file) continue
       // мод из словаря известных библиотек принимаем по адресу: внутри он бывает «архивом в архиве»
       if (KNOWN_SLUGS[depId] === p.slug) return p
-      const meta = await this.readMeta(file.url, file.size)
+      const meta = await this.readMeta(file.url, file.size, undefined, this.loader)
       if (meta?.ids.includes(depId)) return p
     }
     return null
@@ -293,8 +382,8 @@ export class PackBuilder {
     mods.forEach((m, i) => metas[i]?.ids.forEach(id => byId.set(id, m)))
     let removed = false
     for (const [i, m] of mods.entries()) {
-      if (m.dep || !this.chosen.has(m.project.id)) continue
-      if (!['perf', 'qol'].includes(m.section.id)) {
+      if (!this.chosen.has(m.project.id)) continue
+      if (!m.dep && !['perf', 'qol'].includes(m.section.id)) {
         const base = missingBase(m.project, this.chosen)
         if (base) {
           this.remove(m.project.id, `дополнение к ${base}, а его нет в сборке`)
@@ -305,12 +394,36 @@ export class PackBuilder {
       if (!m.version.date || !metas[i]) continue
       for (const depId of metas[i].depends) {
         const d = byId.get(depId)
-        if (!d || d === m || STABLE_LIBS.has(d.project.slug)) continue
+        if (!d || d === m) continue
+        // версия, которую мод сам разрешает (так же проверит и игра при запуске)
+        const range = metas[i].ranges?.[depId]
+        const have = libVersion(d.version.number, this.version)
+        if (range && have && !rangeFits(range, metas[i].mcKind, have)) {
+          this.remove(m.project.id, `нужен ${d.project.title} версии ${range}, а под ${this.version} есть только ${have}`)
+          removed = true
+          break
+        }
+        if (STABLE_LIBS.has(d.project.slug)) continue
         const list = await this.api.versions(d.project.id, this.version, this.loaders)
         const before = list.find(v => v.date_published <= m.version.date)
         const then = before && majorMinor(before.version_number, this.version)
         const now = majorMinor(d.version.number, this.version)
-        if (then && now && then !== now) {
+        if (!then || !now || then === now) continue
+        // библиотека нужна только этому моду — ставим ту её версию, под которую он сделан (Blueprint для Buzzier Bees)
+        const others = mods.filter((o, j) => o !== m && o !== d && this.chosen.has(o.project.id) && metas[j]?.depends.includes(depId))
+        const olderFile = fileOf(before)
+        if (!others.length && olderFile && !wrongMcInFilename(olderFile.filename, this.version)) {
+          d.version = { id: before.id, number: before.version_number, date: before.date_published }
+          d.file = olderFile
+          this.metaCache.delete(d.project.id)
+          removed = true // перепроверим сборку с этой версией
+          break
+        }
+        // библиотека нужна и другим: разница в одну версию обычно не мешает, большой скачок ломает
+        // (RPG Minibosses под Spell Engine 1.8 падал с 1.10)
+        const [tMaj, tMin] = then.split('.').map(Number)
+        const [nMaj, nMin] = now.split('.').map(Number)
+        if (tMaj !== nMaj || Math.abs(nMin - tMin) >= 2) {
           this.remove(m.project.id, `давно не обновлялся: сделан под ${d.project.title} ${then}, а в сборке ${now}`)
           removed = true
           break
@@ -324,11 +437,102 @@ export class PackBuilder {
    * Проверка «что внутри»: читает fabric.mod.json / mods.toml каждого мода.
    * Чего не хватает — ищет и добавляет; не нашлось — убирает мод, которому это нужно.
    */
+  // Подходит ли файл мода к этой сборке. Возвращает причину или null.
+  fileProblem(meta) {
+    if (!meta) return null
+    const forgeLike = ['forge', 'neoforge'].includes(this.loader)
+    if (forgeLike && ['fabric', 'quilt'].includes(meta.kind)) return 'в файле версия только для Fabric'
+    if (!forgeLike && ['forge', 'neoforge'].includes(meta.kind)) return 'в файле версия только для Forge/NeoForge'
+    if (this.loader === 'fabric' && meta.kind === 'quilt') return 'в файле версия только для Quilt'
+    if (this.loader === 'forge' && meta.kind === 'neoforge') return 'в файле версия только для NeoForge'
+    // NeoForge с 1.20.5 читает только neoforge.mods.toml
+    if (this.loader === 'neoforge' && meta.kind === 'forge' && !/^1\.20\.[1-4]$/.test(this.version)) return 'в файле версия для Forge, а не NeoForge'
+    if (meta.mc && !rangeFits(meta.mc, meta.mcKind, this.version)) {
+      return `файл сделан для Minecraft ${[meta.mc].flat().join(' / ')}, а не ${this.version}`
+    }
+    if (meta.kind === 'neoforge' && meta.hasModLoader === false && OLD_NEO(this.version)) return 'файл для более новой версии NeoForge (Missing ModLoader)'
+    return null
+  }
+
+  // Файл не подошёл: ищем другую версию этого же мода; не нашлась — убираем мод
+  async reselect(mod, why) {
+    const list = await this.api.versions(mod.project.id, this.version, this.loaders)
+    for (const v of list.slice(0, 8)) {
+      if (v.id === mod.version.id) continue
+      const file = fileOf(v)
+      if (!file || wrongMcInFilename(file.filename, this.version)) continue
+      const meta = await this.readMeta(file.url, file.size, undefined, this.loader)
+      if (!meta || this.fileProblem(meta)) continue
+      mod.version = { id: v.id, number: v.version_number, date: v.date_published }
+      mod.file = file
+      this.metaCache.set(mod.project.id, Promise.resolve(meta))
+      return true
+    }
+    this.remove(mod.project.id, why)
+    return false
+  }
+
+  // Ставит версию мода, которая не попадает в «несовместимый» диапазон. true — получилось.
+  async upgradeOutOf(mod, range, kind) {
+    const list = await this.api.versions(mod.project.id, this.version, this.loaders)
+    const v = list.find(x => {
+      const lv = libVersion(x.version_number, this.version)
+      const f = fileOf(x)
+      return lv && f && !rangeFits(range, kind, lv) && !wrongMcInFilename(f.filename, this.version)
+    })
+    if (!v) return false
+    mod.version = { id: v.id, number: v.version_number, date: v.date_published }
+    mod.file = fileOf(v)
+    this.metaCache.delete(mod.project.id)
+    return true
+  }
+
+  // Два мода встраиваются в игру одним и тем же файлом (Lithium и его порт Radium) или автор явно запретил пару
+  async checkClashes(mods, metas) {
+    const idOwner = new Map()
+    mods.forEach((m, i) => metas[i]?.ids.forEach(id => idOwner.set(id, m)))
+    const mixinOwner = new Map()
+    for (const [i, m] of mods.entries()) {
+      if (!this.chosen.has(m.project.id) || !metas[i]) continue
+      for (const cfg of metas[i].mixins || []) {
+        if (GENERIC_MIXIN.test(cfg)) continue
+        const other = mixinOwner.get(cfg)
+        if (other && other !== m && this.chosen.has(other.project.id)) {
+          this.remove(m.project.id, `делает то же, что ${other.project.title} (оба меняют игру через ${cfg}): вдвоём игра падает`)
+          return true
+        }
+        mixinOwner.set(cfg, m)
+      }
+      for (const [id, range] of Object.entries(metas[i].breaks || {})) {
+        const other = idOwner.get(id)
+        if (!other || other === m || !this.chosen.has(other.project.id)) continue
+        // обычно несовместимость только со старыми версиями («Cristel Lib» и старые Towns and Towers)
+        const have = libVersion(other.version.number, this.version)
+        if (range && range !== '*' && have && !rangeFits(range, metas[i].mcKind, have)) continue
+        // несовместим только со старыми версиями: ставим новее (Sodium 0.8.13 не дружит с Iris до 1.8.13)
+        if (range && range !== '*' && await this.upgradeOutOf(other, range, metas[i].mcKind)) return true
+        this.remove(m.project.id, `автор пишет, что он несовместим с ${other.project.title}`)
+        return true
+      }
+    }
+    return false
+  }
+
   async verifyJars(onProgress = () => {}) {
-    for (let round = 0; round < 4; round++) {
+    for (let round = 0; round < 8; round++) {
       const mods = this.mods()
       const metas = await pool(mods, 6, m => this.metaOf(m))
       onProgress(round)
+      // файл подходит к загрузчику и версии игры?
+      let fixed = false
+      for (const [i, m] of mods.entries()) {
+        const why = this.fileProblem(metas[i])
+        if (why) {
+          await this.reselect(m, why)
+          fixed = true
+        }
+      }
+      if (fixed || await this.checkClashes(mods, metas)) continue
       const provided = new Set()
       mods.forEach((m, i) => {
         const meta = metas[i]
@@ -408,7 +612,7 @@ export async function buildPack(opts, api, emit = () => {}) {
       const p = bySlug.get(slug)
       const reason = key === 'qol' ? 'удобство' : key === 'polish' ? 'атмосфера' : CHUNK_EXTRAS[opts.loader].includes(slug) ? 'быстрая прогрузка чанков'
         : fromRef ? `из ${ref.name}` : 'больше FPS'
-      if (p) await b.tryAdd(p, section, reason, { allowLibrary: true, quiet: key === 'polish' })
+      if (p) await b.tryAdd(p, section, reason, { allowLibrary: true, quiet: key === 'polish', noAlpha: true })
     }
   }
 
@@ -445,8 +649,18 @@ export async function buildPack(opts, api, emit = () => {}) {
     if (!progressed) break
   }
 
+  // шейдеры и ресурспаки — только если попросили
+  let extras = []
+  if (opts.graphics?.shader || opts.graphics?.packs?.length) {
+    progress(0.88, 'Добавляю графику: шейдеры и ресурспаки…')
+    extras = await addGraphics(b, api, opts.graphics)
+  }
+
   progress(0.9, 'Заглядываю внутрь модов: что им нужно на самом деле…')
   await b.verifyJars()
+  // если мод для шейдеров не прошёл проверку — шейдер без него бесполезен
+  const shaderModOk = b.mods().some(m => m.project.slug === SHADER_MOD[opts.loader])
+  extras = extras.filter(e => e.kind !== 'shader' || shaderModOk)
   // внутренние id и зависимости модов: по ним «Доктор» найдёт мод в crash-report
   for (const m of b.mods()) {
     const meta = await b.metaOf(m).catch(() => null)
@@ -458,6 +672,6 @@ export async function buildPack(opts, api, emit = () => {}) {
   progress(1, 'Готово')
   // темы, по которым в итоге не осталось ни одного мода: честно скажем об этом
   const emptyThemes = themes.filter(t => t.theme !== VANILLA_PLUS && !b.mods().some(m => m.section.id === t.theme.id)).map(t => t.theme.label)
-  return { mods: b.mods(), skipped: b.skipped, emptyThemes, loaderVersion, version: opts.version, loader: opts.loader,
+  return { mods: b.mods(), extras, skipped: b.skipped, emptyThemes, loaderVersion, version: opts.version, loader: opts.loader,
     ref: ref && { name: ref.name, license: ref.license, version: ref.version, configs: ref.configs } }
 }

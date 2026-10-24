@@ -2,6 +2,7 @@
 import { THEMES } from './themes.js'
 import { REFERENCES } from './references.js'
 import { INTENTS } from './intents.js'
+import { lookup } from './dictionary.js'
 
 const LOADERS = [
   ['neoforge', ['neoforge', 'neo forge', 'неофордж', 'неофорж']],
@@ -68,10 +69,12 @@ export function analyze(text) {
   const neg = negatedPositions(toks)
   const themes = new Map()
   const excluded = new Map()
+  const used = new Set() // позиции слов, которые уже что-то значат
 
   for (const theme of THEMES) {
     const hits = theme.stems.flatMap(stem => stemHits(stem, toks, t))
     if (!hits.length) continue
+    hits.forEach(h => used.add(h.pos))
     const positive = hits.filter(h => !neg.has(h.pos))
     if (positive.length) themes.set(theme.id, { theme, word: positive[0].word, via: null })
     else excluded.set(theme.id, theme)
@@ -81,6 +84,7 @@ export function analyze(text) {
   for (const [label, stems, ids] of REFERENCES) {
     const hits = stems.flatMap(stem => stemHits(stem, toks, t))
     if (!hits.length) continue
+    hits.forEach(h => used.add(h.pos))
     const isNeg = hits.every(h => neg.has(h.pos))
     references.push({ label, negative: isNeg })
     for (const id of ids) {
@@ -95,6 +99,7 @@ export function analyze(text) {
   for (const intent of INTENTS) {
     const hits = intent.stems.flatMap(stem => stemHits(stem, toks, t))
     if (!hits.length) continue
+    hits.forEach(h => used.add(h.pos))
     // «не для новичка» — пропускаем; фразы вроде «без хардкора» сами содержат отрицание
     if (hits.every(h => neg.has(h.pos)) && !intent.stems.some(s => /^(без|не) /.test(s))) continue
     intents.push(intent.label)
@@ -115,12 +120,39 @@ export function analyze(text) {
       if (themes.has(theme.id) || excluded.has(theme.id)) continue
       // отличие только в последней букве основы — это окончание другого слова («классная» ≠ «классы»), не опечатка
       if (tok.startsWith(stem.slice(0, -1))) continue
-      if (closeEnough(tok, stem)) { themes.set(theme.id, { theme, word: tok, via: 'опечатка' }); break }
+      if (closeEnough(tok, stem)) { themes.set(theme.id, { theme, word: tok, via: 'опечатка' }); used.add(pos); break }
     }
+  })
+
+  // слова, которых не узнала ни одна тема: переводим по словарю и ищем моды прямо по ним (тема «на лету»)
+  let dynamic = 0
+  toks.forEach((tok, pos) => {
+    if (dynamic >= 4 || used.has(pos) || tok.length < 3 || /\d/.test(tok) || STOPWORDS.test(tok) || EN_STOP.has(tok)) return
+    const found = /^[a-z]/.test(tok) ? (tok.length >= 4 ? { en: tok } : null) : lookup(tok)
+    if (!found) return
+    const theme = dynamicTheme(tok, found.en)
+    if (themes.has(theme.id) || excluded.has(theme.id) || [...themes.values()].some(x => x.theme.queries.includes(found.en))) return
+    dynamic++
+    if (neg.has(pos)) excluded.set(theme.id, theme)
+    else themes.set(theme.id, { theme, word: tok, via: 'поиск' })
   })
 
   for (const id of excluded.keys()) themes.delete(id)
   return { themes: [...themes.values()], excluded: [...excluded.values()], references, intents, settings }
+}
+
+// английские служебные слова — по ним моды не ищем
+const EN_STOP = new Set(['with', 'and', 'the', 'for', 'mods', 'mod', 'modpack', 'pack', 'minecraft', 'some', 'more', 'very', 'good', 'cool',
+  'nice', 'best', 'like', 'want', 'need', 'game', 'play', 'lots', 'many', 'much', 'without', 'also', 'from', 'that', 'this', 'just',
+  'vanilla', 'vanilla+', 'light', 'small', 'huge', 'large', 'big', 'normal', 'edition', 'version', 'java', 'bedrock', 'fps'])
+
+// Тема «на лету» для слова из словаря: ищет моды по английскому переводу
+function dynamicTheme(word, en) {
+  const id = `q:${en}`
+  if (!THEME_BY_ID.has(id)) {
+    THEME_BY_ID.set(id, { id, label: `«${word}»`, color: '#5ee7df', stems: [], queries: [en], categories: [], dynamic: true })
+  }
+  return THEME_BY_ID.get(id)
 }
 
 // частые слова запросов: их не «исправляем» в темы

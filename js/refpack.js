@@ -17,6 +17,16 @@ export const CHUNK_EXTRAS = {
   neoforge: ['packet-fixer', 'particle-core'],
 }
 
+// Что из эталона НЕ берём (проверено на настоящих падениях, 24.10):
+// C2ME для NeoForge — альфа, с ScalableLux мир висит на 0%; Saturn спорит с ModernFix и Lithium;
+// Log Begone прячет ошибки из лога — без них не найти виновника падения
+export const REF_SKIP = {
+  fabric: /^log-begone/,
+  quilt: /^log-begone/,
+  forge: /^log-begone/,
+  neoforge: /^(c2me|scalablelux|saturn|log-begone)/,
+}
+
 // Конфиги, которые не нужны или вредны в чужой сборке
 const SKIP_CONFIG = /fabric_loader_dependencies\.json|\/jei\/world\/|crash_assistant\/modlist\.json|problematic_mods_config|options\.txt$|\/servers\.dat$/
 
@@ -43,7 +53,8 @@ export async function loadRefPack(api, loader, mc, JSZip = globalThis.JSZip, fet
       if (entry.dir || !path.startsWith('overrides/config/') || SKIP_CONFIG.test(path)) continue
       configs.push({ path: path.replace(/^overrides\//, ''), data: await entry.async('uint8array') })
     }
-    return { name: ref.name, license: ref.license, version: v.version_number, slugs: projects.map(p => p.slug), configs }
+    const skip = REF_SKIP[loader]
+    return { name: ref.name, license: ref.license, version: v.version_number, slugs: projects.map(p => p.slug).filter(slug => !skip?.test(slug)), configs }
   } catch {
     return null // нет сети или сборка изменила формат: возьмём свой список
   }
